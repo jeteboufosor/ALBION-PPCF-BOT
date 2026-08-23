@@ -28,16 +28,9 @@ def _can_tresorerie(member: discord.Member) -> bool:
 
 
 def _parse_date(raw: str) -> datetime:
-    text = raw.strip()
-    for fmt in ("%d/%m/%Y", "%d/%m/%Y %H:%M", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(text, fmt)
-            if fmt == "%d/%m/%Y" or fmt == "%Y-%m-%d":
-                dt = dt.replace(hour=23, minute=59)
-            return dt.replace(tzinfo=TZ)
-        except ValueError:
-            continue
-    raise ValueError("Date : JJ/MM/AAAA")
+    from bot.utils.helpers import parse_discord_time
+
+    return parse_discord_time(raw)
 
 
 async def build_treasury_embed():

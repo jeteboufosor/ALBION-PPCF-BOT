@@ -27,6 +27,7 @@ from bot.utils.embeds import (
     success_embed,
     warning_embed,
 )
+from bot.utils.helpers import parse_discord_time
 from bot.utils.permissions import can_manage_orders, find_channel
 
 LOGGER = logging.getLogger(__name__)
@@ -59,22 +60,8 @@ def _can_manage(member: discord.Member) -> bool:
     return settings.test_mode or can_manage_orders(member)
 
 
-_TS_RE = re.compile(r"<t:(\d+)(?::[tTdDfFR])?>")
-
-
 def _parse_deadline(raw: str) -> datetime:
-    text = raw.strip()
-    match = _TS_RE.search(text)
-    if match:
-        return datetime.fromtimestamp(int(match.group(1)), tz=UTC)
-    if text.isdigit() and len(text) >= 10:
-        return datetime.fromtimestamp(int(text), tz=UTC)
-    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"):
-        try:
-            return datetime.strptime(text, fmt).replace(tzinfo=TZ)
-        except ValueError:
-            continue
-    raise ValueError("Deadline : `<t:1787511600:R>` ou `JJ/MM/AAAA HH:MM`")
+    return parse_discord_time(raw)
 
 
 def _reward_lines(order: Order) -> str:
@@ -144,6 +131,7 @@ def build_order_embed(order: Order) -> discord.Embed:
     description = (
         f"-# ORDRE PRIORITAIRE  ·  {format_order_number(order.order_number)}\n"
         f"{rule}\n\n"
+        f"## {emoji}  {order.title.upper()}\n\n"
         f"## BRIEFING\n"
         f"{order.description}\n\n"
         f"## OBJECTIF  —  {percent}%\n"
@@ -152,14 +140,10 @@ def build_order_embed(order: Order) -> discord.Embed:
         f"{close_line}"
     )
 
-    embed = discord.Embed(
-        title=f"{emoji}   {order.title.upper()}",
-        description=description,
-        color=color,
-    )
+    embed = discord.Embed(description=description, color=color)
     embed.add_field(
         name="⏰ Deadline",
-        value=f"{discord_timestamp(deadline, 'F')}\nSe termine {discord_timestamp(deadline, 'R')}",
+        value=discord_timestamp(deadline, "R"),
         inline=False,
     )
     embed.add_field(name="📌 Statut", value=status_label, inline=True)

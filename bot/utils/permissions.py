@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 import discord
 
-from bot.config import ADMIN_ROLE_KEYS, OFFICER_ROLE_KEYS, ORDER_MANAGER_ROLE_KEYS, ROLE_NAMES
+from bot.config import ADMIN_ROLE_KEYS, CHANNEL_NAMES, OFFICER_ROLE_KEYS, ORDER_MANAGER_ROLE_KEYS, ROLE_NAMES
+
+# Mots-clés : retrouve un salon malgré emoji / faute (ex: trésorie).
+CHANNEL_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "treasury": ("tresor", "treasury", "banque"),
+    "history": ("histor",),
+    "declaration": ("declar",),
+    "rules": ("regle", "rules"),
+    "new_guide": ("guide",),
+    "roles": ("role",),
+    "priority_orders": ("ordre-prio", "ordreprio", "prioritaire"),
+    "past_orders": ("ordres-pass", "ordrespass"),
+    "ticket_logs": ("logs-ticket", "logsticket"),
+    "quests": ("quete", "quest"),
+    "arrival_departure": ("arriv",),
+    "deployment": ("deploi", "deploy"),
+}
 
 
 def _member_role_names(member: discord.Member) -> set[str]:
@@ -12,8 +30,6 @@ def _member_role_names(member: discord.Member) -> set[str]:
 
 
 def has_any_role(member: discord.Member, role_keys: tuple[str, ...] | list[str] | set[str]) -> bool:
-    """Vérifie si un membre possède au moins un rôle configuré."""
-
     names = _member_role_names(member)
     expected = {ROLE_NAMES[key] for key in role_keys if key in ROLE_NAMES}
     return bool(names & expected)
@@ -35,20 +51,27 @@ def can_manage_treasury(member: discord.Member) -> bool:
     return is_guild_master(member) or has_any_role(member, ("grand_treasurer",))
 
 
-def _normalize_label(value: str) -> str:
-    """Normalise un nom de salon/rôle (emoji, espaces, casse)."""
+def _fold(value: str) -> str:
+    stripped = unicodedata.normalize("NFKD", value)
+    ascii_only = "".join(ch for ch in stripped if not unicodedata.combining(ch))
+    cleaned = "".join(ch.lower() if ch.isalnum() or ch in {"-", "_"} else "-" for ch in ascii_only)
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-")
 
-    cleaned = "".join(ch for ch in value.lower() if ch.isalnum() or ch in {"-", "_", " "})
-    return cleaned.replace("_", "-").replace(" ", "-").strip("-")
+
+def _normalize_label(value: str) -> str:
+    return _fold(value)
 
 
 def role_by_name(guild: discord.Guild, role_name: str) -> discord.Role | None:
     exact = discord.utils.get(guild.roles, name=role_name)
     if exact is not None:
         return exact
-    target = _normalize_label(role_name)
+    target = _fold(role_name)
     for role in guild.roles:
-        if _normalize_label(role.name) == target or target in _normalize_label(role.name):
+        folded = _fold(role.name)
+        if folded == target or target in folded or folded in target:
             return role
     return None
 
@@ -57,9 +80,10 @@ def channel_by_name(guild: discord.Guild, channel_name: str) -> discord.TextChan
     channel = discord.utils.get(guild.text_channels, name=channel_name)
     if isinstance(channel, discord.TextChannel):
         return channel
-    target = _normalize_label(channel_name)
+    target = _fold(channel_name)
     for text_channel in guild.text_channels:
-        if _normalize_label(text_channel.name) == target or target in _normalize_label(text_channel.name):
+        folded = _fold(text_channel.name)
+        if folded == target or target in folded or folded in target:
             return text_channel
     return None
 
@@ -69,6 +93,15 @@ def find_role(guild: discord.Guild, key: str) -> discord.Role | None:
 
 
 def find_channel(guild: discord.Guild, key: str) -> discord.TextChannel | None:
-    from bot.config import CHANNEL_NAMES
-
-    return channel_by_name(guild, CHANNEL_NAMES.get(key, key))
+    official = CHANNEL_NAMES.get(key, key)
+    found = channel_by_name(guild, official)
+    if found is not None:
+        return found
+    found = channel_by_name(guild, key)
+    if found is not None:
+        return found
+    for keyword in CHANNEL_KEYWORDS.get(key, ()):
+        for text_channel in guild.text_channels:
+            if keyword in _fold(text_channel.name):
+                return text_channel
+    return None

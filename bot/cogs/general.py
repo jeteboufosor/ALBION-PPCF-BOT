@@ -43,7 +43,16 @@ class General(commands.Cog):
         existing_channels = {channel.name for channel in guild.channels}
 
         missing_roles = [name for name in ROLE_NAMES.values() if name not in existing_roles]
-        missing_channels = [name for name in CHANNEL_NAMES.values() if name not in existing_channels]
+        from bot.utils.permissions import find_channel
+
+        missing_channels = []
+        found_channels = []
+        for key, name in CHANNEL_NAMES.items():
+            ch = find_channel(guild, key)
+            if ch is None:
+                missing_channels.append(name)
+            else:
+                found_channels.append(f"✅ {ch.mention}")
 
         embed = discord.Embed(
             title="🛠️ Vérification de la configuration",
