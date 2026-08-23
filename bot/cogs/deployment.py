@@ -222,11 +222,6 @@ async def remind_subscribers(bot: commands.Bot, dep: Deployment) -> int:
             sent += 1
         except discord.HTTPException:
             LOGGER.warning("DM déploiement refusé pour %s", uid)
-    if to_dm:
-        channel = bot.get_channel(dep.channel_id) if dep.channel_id else None
-        if isinstance(channel, discord.TextChannel):
-            pings = " ".join(f"<@{uid}>" for uid in to_dm)
-            await channel.send(f"🐴 Rappel **10 min** — déploiement `{dep.id}` {dep.activity_type}\n{pings}")
     LOGGER.info("Rappels déploiement %s: %s DM, %s inscrits", dep.id, sent, len(to_dm))
     return sent
 
