@@ -466,10 +466,22 @@ class Orders(commands.Cog):
                     return
                 session.add(OrderParticipant(order_id=order.id, member_id=member.id))
                 await session.flush()
+
+            async with session_scope() as session:
                 order = await _load_order(session, order_id)
                 assert order is not None
-                await refresh_order_message(self.bot, order)
-            await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
+                embed = build_order_embed(order)
+                view = OrderButtons(order.id)
+            if interaction.message is not None:
+                try:
+                    await interaction.response.edit_message(embed=embed, view=view)
+                    await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
+                    return
+                except discord.HTTPException:
+                    pass
+            await refresh_order_message(self.bot, order)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
             return
 
         if action in {"complete", "cancel"}:

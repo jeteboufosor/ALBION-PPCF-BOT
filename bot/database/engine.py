@@ -58,6 +58,27 @@ engine: AsyncEngine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 
 
+async def _add_missing_order_columns(conn) -> None:
+    """Ajoute les colonnes d'audit si la table orders existait déjà."""
+
+    statements = (
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by_discord_id BIGINT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by_discord_id BIGINT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS close_reason VARCHAR(40)",
+    )
+    if IS_SQLITE:
+        statements = (
+            "ALTER TABLE orders ADD COLUMN cancelled_by_discord_id BIGINT",
+            "ALTER TABLE orders ADD COLUMN completed_by_discord_id BIGINT",
+            "ALTER TABLE orders ADD COLUMN close_reason VARCHAR(40)",
+        )
+    for stmt in statements:
+        try:
+            await conn.execute(text(stmt))
+        except Exception:
+            pass
+
+
 async def init_db() -> None:
     """Crée les tables manquantes.
 
