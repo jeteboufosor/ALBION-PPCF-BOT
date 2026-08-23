@@ -22,6 +22,7 @@ CHANNEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "quests": ("quete", "quest"),
     "arrival_departure": ("arriv",),
     "deployment": ("deploi", "deploy"),
+    "promotion": ("promo",),
 }
 
 

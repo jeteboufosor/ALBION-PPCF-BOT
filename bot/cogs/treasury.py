@@ -348,11 +348,12 @@ class Treasury(commands.Cog):
                 req.status = "closed"
                 req.fulfilled_at = utcnow()
             item_label = req.item_name
+        donor = donateur or interaction.user
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
             interaction.guild,  # type: ignore[arg-type]
-            "📦 Demande débitée",
-            f"{interaction.user.mention} retire **{quantite}× {item_label}** (id `{id}`)\n{before} → **{after}**",
+            "📦 Ressource ajoutée",
+            f"{donor.mention} a ajouté **{quantite}× {item_label}** (`{id}`)\n{before} → **{after}**",
         )
         await interaction.followup.send(
             embed=success_embed("Demande mise à jour", f"{item_label} : {before} → **{after}** restants"),
