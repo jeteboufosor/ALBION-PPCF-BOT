@@ -163,7 +163,10 @@ class ContributionScore(Base, TimestampMixin):
     order_points_all_time: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     order_points_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_silver_donated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    silver_donated_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_fame: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fame_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fame_baseline: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_period: Mapped[str] = mapped_column(String(7), default="", nullable=False)  # YYYY-MM
 
     member: Mapped[Member] = relationship(back_populates="contribution_score")

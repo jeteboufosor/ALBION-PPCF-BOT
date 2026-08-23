@@ -1,26 +1,47 @@
-"""Phase 7 — Classements ordres / fame / dons."""
+"""Phase 7 — Classement unique avec navigation catégorie + période."""
 
 from __future__ import annotations
 
 import logging
+import re
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from bot.database.engine import session_scope
 from bot.database.models import ContributionScore, Member
 from bot.services.albion_api import AlbionAPIClient, AlbionAPIError
-from bot.utils.embeds import error_embed, format_silver, info_embed
+from bot.utils.embeds import format_silver
 from bot.utils.permissions import find_channel
 
 LOGGER = logging.getLogger(__name__)
 MEDALS = ("🥇", "🥈", "🥉")
 
+CATS = ("ordres", "fame", "dons")
+PERIODS = ("month", "all")
 
-async def _top(session, column: str, limit: int = 10) -> list[tuple[Member, ContributionScore]]:
+CAT_META: dict[str, dict[str, str]] = {
+    "ordres": {"emoji": "🎯", "label": "Ordres", "title": "ORDRES"},
+    "fame": {"emoji": "⚔️", "label": "Fame", "title": "FAME"},
+    "dons": {"emoji": "💰", "label": "Dons", "title": "DONATEURS"},
+}
+PERIOD_META = {
+    "month": {"label": "Mensuel", "hint": "ce mois-ci"},
+    "all": {"label": "All-time", "hint": "depuis toujours"},
+}
+COLUMNS = {
+    ("ordres", "all"): "order_points_all_time",
+    ("ordres", "month"): "order_points_monthly",
+    ("fame", "all"): "total_fame",
+    ("fame", "month"): "fame_monthly",
+    ("dons", "all"): "total_silver_donated",
+    ("dons", "month"): "silver_donated_monthly",
+}
+
+
+async def _top(session, column: str, limit: int = 15) -> list[tuple[Member, ContributionScore]]:
     col = getattr(ContributionScore, column)
     result = await session.execute(
         select(Member, ContributionScore)
@@ -34,34 +55,128 @@ async def _top(session, column: str, limit: int = 10) -> list[tuple[Member, Cont
 def _lines(rows: list[tuple[Member, ContributionScore]], attr: str, *, silver: bool = False) -> str:
     out = []
     for i, (member, score) in enumerate(rows):
-        medal = MEDALS[i] if i < 3 else f"`{i+1:02d}`"
+        medal = MEDALS[i] if i < 3 else f"`{i + 1:02d}`"
         value = getattr(score, attr)
         shown = format_silver(value) if silver else f"{value:,}".replace(",", " ")
         name = member.discord_name or member.albion_name or "?"
-        out.append(f"{medal} **{name}** — {shown}")
-    return "\n".join(out) or "*aucun*"
+        mention = f"<@{member.discord_id}>" if member.discord_id else name
+        out.append(f"{medal}  {mention}  ·  **{shown}**")
+    return "\n".join(out) or "*aucun score*"
 
 
-async def build_leaderboard_embeds() -> list[discord.Embed]:
+async def build_leaderboard_embed(cat: str = "ordres", period: str = "month") -> discord.Embed:
+    if cat not in CAT_META:
+        cat = "ordres"
+    if period not in PERIOD_META:
+        period = "month"
+    column = COLUMNS[(cat, period)]
     async with session_scope() as session:
-        orders = await _top(session, "order_points_all_time")
-        monthly = await _top(session, "order_points_monthly")
-        fame = await _top(session, "total_fame")
-        dons = await _top(session, "total_silver_donated")
-    e1 = info_embed("🎯 TOP CONTRIBUTEURS ORDRES", _lines(orders, "order_points_all_time"))
-    e2 = info_embed("📅 TOP ORDRES DU MOIS", _lines(monthly, "order_points_monthly"))
-    e3 = info_embed("⚔️ TOP FAME", _lines(fame, "total_fame"))
-    e4 = info_embed("💰 TOP DONATEURS", _lines(dons, "total_silver_donated", silver=True))
-    return [e1, e2, e3, e4]
+        rows = await _top(session, column)
+    meta = CAT_META[cat]
+    per = PERIOD_META[period]
+    rule = "━" * 26
+    embed = discord.Embed(
+        description=(
+            f"-# CLASSEMENT  ·  {per['label'].upper()}\n"
+            f"{rule}\n\n"
+            f"## {meta['emoji']}  TOP {meta['title']}\n"
+            f"-# {per['hint']}\n\n"
+            f"{_lines(rows, column, silver=cat == 'dons')}"
+        ),
+        color=discord.Color.gold() if cat == "dons" else discord.Color.dark_gold(),
+    )
+    embed.set_footer(text="Albion PPCF • Fort Sterling  ·  ◄ ► période  ·  boutons = catégorie")
+    return embed
+
+
+def other_period(period: str) -> str:
+    return "all" if period == "month" else "month"
+
+
+class LeaderboardNavItem(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"lb:(?P<kind>cat|per):(?P<cat>ordres|fame|dons):(?P<per>month|all):(?P<val>ordres|fame|dons|left|right)",
+):
+    def __init__(self, kind: str, cat: str, period: str, value: str) -> None:
+        if kind == "cat":
+            meta = CAT_META[value]
+            super().__init__(
+                discord.ui.Button(
+                    label=meta["label"],
+                    emoji=meta["emoji"],
+                    style=discord.ButtonStyle.primary if value == cat else discord.ButtonStyle.secondary,
+                    disabled=value == cat,
+                    custom_id=f"lb:cat:{cat}:{period}:{value}",
+                )
+            )
+        else:
+            target_label = PERIOD_META[other_period(period)]["label"]
+            emoji = "◀️" if value == "left" else "▶️"
+            super().__init__(
+                discord.ui.Button(
+                    label=target_label,
+                    emoji=emoji,
+                    style=discord.ButtonStyle.success,
+                    custom_id=f"lb:per:{cat}:{period}:{value}",
+                )
+            )
+        self.kind = kind
+        self.cat = cat
+        self.period = period
+        self.value = value
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+        /,
+    ) -> LeaderboardNavItem:
+        return cls(match["kind"], match["cat"], match["per"], match["val"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        if self.kind == "cat":
+            cat, period = self.value, self.period
+        else:
+            cat, period = self.cat, other_period(self.period)
+        embed = await build_leaderboard_embed(cat, period)
+        try:
+            await interaction.message.edit(embed=embed, view=LeaderboardView(cat, period))
+        except discord.HTTPException:
+            LOGGER.exception("Maj leaderboard impossible")
+
+
+class LeaderboardView(discord.ui.View):
+    def __init__(self, cat: str = "ordres", period: str = "month") -> None:
+        super().__init__(timeout=None)
+        for key in CATS:
+            self.add_item(LeaderboardNavItem("cat", cat, period, key))
+        self.add_item(LeaderboardNavItem("per", cat, period, "left"))
+        self.add_item(
+            discord.ui.Button(
+                label=PERIOD_META[period]["label"],
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+                custom_id=f"lb:per:{cat}:{period}:{period}",
+            )
+        )
+        self.add_item(LeaderboardNavItem("per", cat, period, "right"))
 
 
 class Leaderboard(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.api = AlbionAPIClient()
-        self._message_ids: list[int] = []
+        self._message_id: int | None = None
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(LeaderboardNavItem)
 
     async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(LeaderboardNavItem)
         await self.api.close()
 
     async def refresh_fame_from_api(self) -> None:
@@ -87,66 +202,70 @@ class Leaderboard(commands.Cog):
                                 db.albion_player_id = str(pid)
                         data = await self.api.get_player(str(pid))
                 total = int((data or {}).get("KillFame") or 0) + int((data or {}).get("DeathFame") or 0)
-                # Fame totale joueur
                 fame = int((data or {}).get("LifetimeStatistics", {}).get("PvE", {}).get("Total") or 0)
                 fame += int((data or {}).get("KillFame") or 0)
                 if fame <= 0:
                     fame = total
                 async with session_scope() as session:
-                    score = await session.scalar(select(ContributionScore).where(ContributionScore.member_id == member.id))
+                    score = await session.scalar(
+                        select(ContributionScore).where(ContributionScore.member_id == member.id)
+                    )
                     if score:
+                        if not score.fame_baseline:
+                            score.fame_baseline = fame
                         score.total_fame = fame
+                        score.fame_monthly = max(0, fame - (score.fame_baseline or 0))
             except (AlbionAPIError, Exception):
                 LOGGER.debug("Fame skip %s", member.albion_name)
 
-    async def post_or_update(self, guild: discord.Guild) -> None:
+    async def post_or_update(self, guild: discord.Guild, *, cat: str = "ordres", period: str = "month") -> None:
         channel = find_channel(guild, "leaderboard")
         if channel is None:
             return
         await self.refresh_fame_from_api()
-        embeds = await build_leaderboard_embeds()
-        if len(self._message_ids) == 4:
-            ok = True
-            for mid, embed in zip(self._message_ids, embeds, strict=False):
-                try:
-                    msg = await channel.fetch_message(mid)
-                    await msg.edit(embed=embed)
-                except discord.HTTPException:
-                    ok = False
-                    break
-            if ok:
+        embed = await build_leaderboard_embed(cat, period)
+        view = LeaderboardView(cat, period)
+        if self._message_id:
+            try:
+                msg = await channel.fetch_message(self._message_id)
+                await msg.edit(embed=embed, view=view)
                 return
-        self._message_ids = []
-        for embed in embeds:
-            msg = await channel.send(embed=embed)
-            self._message_ids.append(msg.id)
+            except discord.HTTPException:
+                pass
+        msg = await channel.send(embed=embed, view=view)
+        self._message_id = msg.id
 
-    @app_commands.command(name="leaderboard", description="Affiche un classement.")
+    @app_commands.command(name="leaderboard", description="Affiche le classement (1 embed, boutons de nav).")
     @app_commands.choices(
-        filtre=[
+        categorie=[
             app_commands.Choice(name="ordres", value="ordres"),
             app_commands.Choice(name="fame", value="fame"),
             app_commands.Choice(name="dons", value="dons"),
-            app_commands.Choice(name="mensuel", value="mensuel"),
-            app_commands.Choice(name="global", value="global"),
-        ]
+        ],
+        periode=[
+            app_commands.Choice(name="mensuel", value="month"),
+            app_commands.Choice(name="all-time", value="all"),
+        ],
     )
-    async def leaderboard_cmd(self, interaction: discord.Interaction, filtre: app_commands.Choice[str] | None = None) -> None:
+    async def leaderboard_cmd(
+        self,
+        interaction: discord.Interaction,
+        categorie: app_commands.Choice[str] | None = None,
+        periode: app_commands.Choice[str] | None = None,
+    ) -> None:
         await interaction.response.defer()
-        embeds = await build_leaderboard_embeds()
-        mapping = {"ordres": 0, "mensuel": 1, "fame": 2, "dons": 3}
-        if filtre is None or filtre.value == "global":
-            await interaction.followup.send(embeds=embeds)
-            return
-        await interaction.followup.send(embed=embeds[mapping[filtre.value]])
+        cat = categorie.value if categorie else "ordres"
+        period = periode.value if periode else "month"
+        embed = await build_leaderboard_embed(cat, period)
+        await interaction.followup.send(embed=embed, view=LeaderboardView(cat, period))
 
-    @app_commands.command(name="setup_leaderboard", description="Poste les 4 classements dans #leaderboard.")
+    @app_commands.command(name="setup_leaderboard", description="Poste le classement unique dans #leaderboard.")
     @app_commands.guild_only()
     async def setup_leaderboard(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         assert interaction.guild
         await self.post_or_update(interaction.guild)
-        await interaction.followup.send("Leaderboard posté / mis à jour.", ephemeral=True)
+        await interaction.followup.send("Leaderboard posté / mis à jour (1 embed + boutons).", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

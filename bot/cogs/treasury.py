@@ -129,6 +129,7 @@ async def _credit_silver(session, *, donor: discord.Member, amount: int, note: s
         score = ContributionScore(member_id=db_member.id, monthly_period=utcnow().strftime("%Y-%m"))
         session.add(score)
     score.total_silver_donated += amount
+    score.silver_donated_monthly += amount
     session.add(
         GuildDonation(
             member_id=db_member.id,

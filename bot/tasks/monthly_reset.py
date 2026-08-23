@@ -17,7 +17,13 @@ async def run_monthly_reset(bot: commands.Bot) -> None:
     period = utcnow().strftime("%Y-%m")
     async with session_scope() as session:
         await session.execute(
-            update(ContributionScore).values(order_points_monthly=0, monthly_period=period)
+            update(ContributionScore).values(
+                order_points_monthly=0,
+                silver_donated_monthly=0,
+                fame_monthly=0,
+                fame_baseline=ContributionScore.total_fame,
+                monthly_period=period,
+            )
         )
     LOGGER.info("Reset leaderboard mensuel %s", period)
     cog = bot.get_cog("Leaderboard")

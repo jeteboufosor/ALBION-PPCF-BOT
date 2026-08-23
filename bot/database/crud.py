@@ -64,7 +64,14 @@ async def list_top_scores(
     total_silver_donated, total_fame.
     """
 
-    if column not in {"order_points_all_time", "order_points_monthly", "total_silver_donated", "total_fame"}:
+    if column not in {
+        "order_points_all_time",
+        "order_points_monthly",
+        "total_silver_donated",
+        "silver_donated_monthly",
+        "total_fame",
+        "fame_monthly",
+    }:
         raise ValueError(f"Colonne leaderboard invalide: {column}")
 
     score_column = getattr(ContributionScore, column)
