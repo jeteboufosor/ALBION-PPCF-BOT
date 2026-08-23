@@ -58,22 +58,25 @@ async def _tickets_category(guild: discord.Guild) -> discord.CategoryChannel | N
 async def notify_treasurers(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View | None = None) -> None:
     """DM chaque membre qui a le rôle Grand Trésorier."""
 
-    role = find_role(guild, "grand_treasurer")
-    targets: list[discord.Member] = []
-    if role is not None:
-        targets = [m for m in role.members if not m.bot]
-    if not targets:
-        targets = [m for m in guild.members if not m.bot and can_manage_treasury(m) and find_role(guild, "grand_treasurer") in m.roles]
-    for member in targets:
+    if not guild.chunked:
         try:
-            sent_view = view
-            await member.send(embed=embed, view=sent_view)
+            await guild.chunk()
+        except discord.HTTPException:
+            pass
+    role = find_role(guild, "grand_treasurer")
+    if role is None:
+        LOGGER.warning("Rôle Grand Trésorier introuvable, aucun DM envoyé")
+        return
+    sent = 0
+    for member in role.members:
+        if member.bot:
+            continue
+        try:
+            await member.send(embed=embed)
+            sent += 1
         except discord.HTTPException:
             LOGGER.info("DM Grand Trésorier impossible pour %s", member)
-    if view is not None:
-        view.stop()
-    if not targets:
-        LOGGER.warning("Aucun Grand Trésorier à DM (rôle introuvable ou vide)")
+    LOGGER.info("DM ticket envoyé à %s Grand Trésorier(s)", sent)
 
 
 class TicketCloseView(discord.ui.View):
@@ -249,14 +252,12 @@ async def create_ticket(interaction: discord.Interaction, ticket_type: str, titl
     close_view.stop()
 
     if ticket_type in NOTIFY_TYPES:
-        review = DonationReviewView(ticket_id) if ticket_type == "donate" else None
         await notify_treasurers(
             guild,
             warning_embed(
                 f"Nouveau ticket — {TICKET_TYPES[ticket_type]}",
                 f"{user.mention}\n{title}\n{channel.mention}",
             ),
-            review,
         )
 
     await interaction.followup.send(embed=success_embed("Ticket ouvert", channel.mention), ephemeral=True)

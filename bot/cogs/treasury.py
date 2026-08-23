@@ -188,7 +188,7 @@ class Treasury(commands.Cog):
         await log_history(
             interaction.guild,  # type: ignore[arg-type]
             "📥 Dépôt silver",
-            f"Donateur : {donor.mention}\nEnregistré par : {interaction.user.mention}\n+{format_silver(montant)}\n{note}",
+            f"{donor.mention} a déposé **{format_silver(montant)}**\n{note}",
         )
         await interaction.followup.send(
             embed=success_embed("Dépôt enregistré", f"{format_silver(montant)} de {donor.mention}"),
@@ -319,8 +319,14 @@ class Treasury(commands.Cog):
 
     @app_commands.command(name="ressource_supprimer", description="Débite une quantité sur une demande (id + nombre).")
     @app_commands.guild_only()
-    @app_commands.describe(id="ID de la demande", quantite="Quantité à retirer de la demande")
-    async def ressource_supprimer(self, interaction: discord.Interaction, id: int, quantite: int) -> None:
+    @app_commands.describe(id="ID de la demande", quantite="Quantité ajoutée / débitée", donateur="Qui a apporté (toi par défaut)")
+    async def ressource_supprimer(
+        self,
+        interaction: discord.Interaction,
+        id: int,
+        quantite: int,
+        donateur: discord.Member | None = None,
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
             await interaction.followup.send("Permission insuffisante.", ephemeral=True)
