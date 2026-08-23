@@ -140,8 +140,8 @@ def build_order_embed(order: Order) -> discord.Embed:
 
     item_line = f"\n**Item :** {order.objective_item_name}" if order.objective_item_name else ""
     description = (
-        f"# {emoji} ORDRE {format_order_number(order.order_number)}\n"
-        f"## {order.title}\n\n"
+        f"# {emoji} {order.title}\n"
+        f"-# Ordre {format_order_number(order.order_number)}\n\n"
         f"{order.description}\n\n"
         f"### 📊 Progression — {percent}%\n"
         f"`{bar}`\n"
@@ -372,31 +372,25 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
         return
 
     if action == "accept":
+        await interaction.response.defer()
         async with session_scope() as session:
             order = await _load_order(session, order_id)
             if order is None or order.status != "active":
-                await interaction.response.send_message(embed=error_embed("Ordre inactif"), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("Ordre inactif"), ephemeral=True)
                 return
             member = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
             already = any(p.member_id == member.id for p in order.participants)
             if already:
-                await interaction.response.send_message("Tu es déjà inscrit.", ephemeral=True)
+                await interaction.followup.send("Tu es déjà inscrit.", ephemeral=True)
                 return
             session.add(OrderParticipant(order_id=order.id, member_id=member.id))
             await session.flush()
-
-        async with session_scope() as session:
             order = await _load_order(session, order_id)
             assert order is not None
             embed = build_order_embed(order)
             view = OrderButtons(order.id)
-        try:
-            await interaction.response.edit_message(embed=embed, view=view)
-            await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
-        except discord.HTTPException:
-            await refresh_order_message(bot, order)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
+        await interaction.edit_original_response(embed=embed, view=view)
+        await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
         return
 
     if action in {"complete", "cancel"}:
@@ -553,94 +547,6 @@ class Orders(commands.Cog):
             await interaction.response.send_message(embed=error_embed("Ordre introuvable"), ephemeral=True)
             return
         await interaction.response.send_message(embed=build_order_embed(order), ephemeral=True)
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        if interaction.type is not discord.InteractionType.component or not interaction.data:
-            return
-        custom_id = str(interaction.data.get("custom_id") or "")
-        if not custom_id.startswith("order:"):
-            return
-        parts = custom_id.split(":")
-        if len(parts) != 3:
-            return
-        _, action, raw_id = parts
-        try:
-            order_id = int(raw_id)
-        except ValueError:
-            return
-        await self._handle(interaction, action, order_id)
-
-    async def _handle(self, interaction: discord.Interaction, action: str, order_id: int) -> None:
-        user = interaction.user
-        if action == "progress":
-            if not isinstance(user, discord.Member) or not _can_manage(user):
-                await interaction.response.send_message("Réservé aux gestionnaires d'ordres.", ephemeral=True)
-                return
-            await interaction.response.send_modal(ProgressModal(order_id))
-            return
-
-        if action == "accept":
-            async with session_scope() as session:
-                order = await _load_order(session, order_id)
-                if order is None or order.status != "active":
-                    await interaction.response.send_message(embed=error_embed("Ordre inactif"), ephemeral=True)
-                    return
-                member = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
-                already = any(p.member_id == member.id for p in order.participants)
-                if already:
-                    await interaction.response.send_message("Tu es déjà inscrit.", ephemeral=True)
-                    return
-                session.add(OrderParticipant(order_id=order.id, member_id=member.id))
-                await session.flush()
-
-            async with session_scope() as session:
-                order = await _load_order(session, order_id)
-                assert order is not None
-                embed = build_order_embed(order)
-                view = OrderButtons(order.id)
-            if interaction.message is not None:
-                try:
-                    await interaction.response.edit_message(embed=embed, view=view)
-                    await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
-                    return
-                except discord.HTTPException:
-                    pass
-            await refresh_order_message(self.bot, order)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
-            return
-
-        if action in {"complete", "cancel"}:
-            if not isinstance(user, discord.Member) or not _can_manage(user):
-                await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
-                return
-            if action == "cancel":
-                async with session_scope() as session:
-                    order = await _load_order(session, order_id)
-                    if order is None or order.status != "active":
-                        await interaction.response.send_message(embed=error_embed("Déjà clos"), ephemeral=True)
-                        return
-                    order.status = "cancelled"
-                    order.cancelled_at = utcnow()
-                    order.cancelled_by_discord_id = user.id
-                    order.close_reason = "manual"
-                    await refresh_order_message(self.bot, order)
-                await interaction.response.send_message(
-                    embed=warning_embed("Ordre annulé", f"Annulé par {user.mention}"),
-                    ephemeral=True,
-                )
-                return
-            await interaction.response.defer(ephemeral=True)
-            done = await complete_order(self.bot, order_id, actor_id=user.id, reason="manual")
-            if done is None:
-                await interaction.followup.send(embed=error_embed("Impossible de terminer"), ephemeral=True)
-            else:
-                await interaction.followup.send(
-                    embed=success_embed("Ordre terminé", "Reste 24h ici puis archive dans #ordres-passés."),
-                    ephemeral=True,
-                )
-
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Orders(bot))
