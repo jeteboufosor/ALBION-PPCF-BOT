@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import discord
@@ -58,14 +59,22 @@ def _can_manage(member: discord.Member) -> bool:
     return settings.test_mode or can_manage_orders(member)
 
 
+_TS_RE = re.compile(r"<t:(\d+)(?::[tTdDfFR])?>")
+
+
 def _parse_deadline(raw: str) -> datetime:
     text = raw.strip()
+    match = _TS_RE.search(text)
+    if match:
+        return datetime.fromtimestamp(int(match.group(1)), tz=UTC)
+    if text.isdigit() and len(text) >= 10:
+        return datetime.fromtimestamp(int(text), tz=UTC)
     for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"):
         try:
             return datetime.strptime(text, fmt).replace(tzinfo=TZ)
         except ValueError:
             continue
-    raise ValueError("Format deadline attendu : JJ/MM/AAAA HH:MM")
+    raise ValueError("Deadline : `<t:1787511600:R>` ou `JJ/MM/AAAA HH:MM`")
 
 
 def _reward_lines(order: Order) -> str:
@@ -116,16 +125,16 @@ def build_order_embed(order: Order) -> discord.Embed:
     bar = progress_bar(order.current_amount, order.target_amount, width=28)
     deadline = order.deadline_at
     if deadline.tzinfo is None:
-        deadline = deadline.replace(tzinfo=TZ)
+        deadline = deadline.replace(tzinfo=UTC)
 
     close_line = ""
     if order.status == "cancelled":
-        close_line = f"\n### ❌ Annulé par {_mention(order.cancelled_by_discord_id)}"
+        close_line = f"\n❌ Annulé par {_mention(order.cancelled_by_discord_id)}"
         if order.cancelled_at:
             close_line += f" — {discord_timestamp(order.cancelled_at, 'R')}"
     elif order.status in {"completed", "expired"}:
         who = "la deadline" if order.close_reason == "deadline" else _mention(order.completed_by_discord_id)
-        close_line = f"\n### ✔️ Clôturé par {who}"
+        close_line = f"\n✔️ Clôturé par {who}"
         if order.completed_at:
             close_line += f" — {discord_timestamp(order.completed_at, 'R')}"
 
@@ -136,14 +145,16 @@ def build_order_embed(order: Order) -> discord.Embed:
         f"{order.description}\n\n"
         f"### 📊 Progression — {percent}%\n"
         f"`{bar}`\n"
-        f"**{order.current_amount:,} / {order.target_amount:,}**\n\n"
-        f"### ⏰ Deadline\n"
-        f"{discord_timestamp(deadline, 'F')}\n"
-        f"Se termine {discord_timestamp(deadline, 'R')}\n"
+        f"**{order.current_amount:,} / {order.target_amount:,}**"
         f"{close_line}"
     )
 
     embed = discord.Embed(description=description, color=color)
+    embed.add_field(
+        name="⏰ Deadline",
+        value=f"{discord_timestamp(deadline, 'F')}\nSe termine {discord_timestamp(deadline, 'R')}",
+        inline=False,
+    )
     embed.add_field(name="📌 Statut", value=status_label, inline=True)
     embed.add_field(name="🎯 Type", value=OBJECTIVE_TYPES.get(order.objective_type, order.objective_type) + item_line, inline=True)
     embed.add_field(name="🏆 Points", value=f"+{points} / contributeur", inline=True)
