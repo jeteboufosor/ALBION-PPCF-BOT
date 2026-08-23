@@ -169,13 +169,52 @@ def build_order_embed(order: Order) -> discord.Embed:
     return embed
 
 
+_BUTTON_META = {
+    "accept": ("Accepter", "✅", discord.ButtonStyle.success),
+    "progress": ("Progression", "📊", discord.ButtonStyle.primary),
+    "complete": ("Terminer", "✔️", discord.ButtonStyle.secondary),
+    "cancel": ("Annuler", "❌", discord.ButtonStyle.danger),
+}
+
+
+class OrderActionItem(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"order:(?P<action>accept|progress|complete|cancel):(?P<oid>[0-9]+)",
+):
+    """Bouton persistant (survit au redémarrage) lié à un ordre."""
+
+    def __init__(self, action: str, order_id: int) -> None:
+        label, emoji, style = _BUTTON_META[action]
+        super().__init__(
+            discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=style,
+                custom_id=f"order:{action}:{order_id}",
+            )
+        )
+        self.action = action
+        self.order_id = order_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+        /,
+    ) -> OrderActionItem:
+        return cls(match["action"], int(match["oid"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await handle_order_action(interaction, self.action, self.order_id)
+
+
 class OrderButtons(discord.ui.View):
     def __init__(self, order_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Accepter", emoji="✅", style=discord.ButtonStyle.success, custom_id=f"order:accept:{order_id}"))
-        self.add_item(discord.ui.Button(label="Progression", emoji="📊", style=discord.ButtonStyle.primary, custom_id=f"order:progress:{order_id}"))
-        self.add_item(discord.ui.Button(label="Terminer", emoji="✔️", style=discord.ButtonStyle.secondary, custom_id=f"order:complete:{order_id}"))
-        self.add_item(discord.ui.Button(label="Annuler", emoji="❌", style=discord.ButtonStyle.danger, custom_id=f"order:cancel:{order_id}"))
+        for action in ("accept", "progress", "complete", "cancel"):
+            self.add_item(OrderActionItem(action, order_id))
 
 
 class ProgressModal(discord.ui.Modal, title="Ajouter une progression"):
@@ -320,9 +359,86 @@ async def complete_order(
     return order
 
 
+async def handle_order_action(interaction: discord.Interaction, action: str, order_id: int) -> None:
+    """Traitement unique des boutons d'ordre."""
+
+    bot = interaction.client
+    user = interaction.user
+    if action == "progress":
+        if not isinstance(user, discord.Member) or not _can_manage(user):
+            await interaction.response.send_message("Réservé aux gestionnaires d'ordres.", ephemeral=True)
+            return
+        await interaction.response.send_modal(ProgressModal(order_id))
+        return
+
+    if action == "accept":
+        async with session_scope() as session:
+            order = await _load_order(session, order_id)
+            if order is None or order.status != "active":
+                await interaction.response.send_message(embed=error_embed("Ordre inactif"), ephemeral=True)
+                return
+            member = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
+            already = any(p.member_id == member.id for p in order.participants)
+            if already:
+                await interaction.response.send_message("Tu es déjà inscrit.", ephemeral=True)
+                return
+            session.add(OrderParticipant(order_id=order.id, member_id=member.id))
+            await session.flush()
+
+        async with session_scope() as session:
+            order = await _load_order(session, order_id)
+            assert order is not None
+            embed = build_order_embed(order)
+            view = OrderButtons(order.id)
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+            await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
+        except discord.HTTPException:
+            await refresh_order_message(bot, order)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
+        return
+
+    if action in {"complete", "cancel"}:
+        if not isinstance(user, discord.Member) or not _can_manage(user):
+            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            return
+        if action == "cancel":
+            async with session_scope() as session:
+                order = await _load_order(session, order_id)
+                if order is None or order.status != "active":
+                    await interaction.response.send_message(embed=error_embed("Déjà clos"), ephemeral=True)
+                    return
+                order.status = "cancelled"
+                order.cancelled_at = utcnow()
+                order.cancelled_by_discord_id = user.id
+                order.close_reason = "manual"
+            await refresh_order_message(bot, order)
+            await interaction.response.send_message(
+                embed=warning_embed("Ordre annulé", f"Annulé par {user.mention}"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        done = await complete_order(bot, order_id, actor_id=user.id, reason="manual")
+        if done is None:
+            await interaction.followup.send(embed=error_embed("Impossible de terminer"), ephemeral=True)
+        else:
+            await interaction.followup.send(
+                embed=success_embed("Ordre terminé", "Reste 24h ici puis archive dans #ordres-passés."),
+                ephemeral=True,
+            )
+
+
 class Orders(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(OrderActionItem)
+
+    async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(OrderActionItem)
 
     @app_commands.command(name="ordre_creer", description="Crée un ordre prioritaire.")
     @app_commands.guild_only()
@@ -332,7 +448,7 @@ class Orders(commands.Cog):
         priorite="Basse / moyenne / haute / critique",
         objectif="Quantité cible (ex: 5000)",
         type_objectif="Comment on mesure la progression",
-        deadline="JJ/MM/AAAA HH:MM",
+        deadline="<t:1787511600:R> ou JJ/MM/AAAA HH:MM",
         type_recompense="winner / podium / all / mixed",
         recompense_principale="Winner-takes-all, or, ou récompense pour tous",
         recompense_argent="2e (podium/mixed)",
