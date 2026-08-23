@@ -139,17 +139,24 @@ def build_order_embed(order: Order) -> discord.Embed:
             close_line += f" — {discord_timestamp(order.completed_at, 'R')}"
 
     item_line = f"\n**Item :** {order.objective_item_name}" if order.objective_item_name else ""
+    bar = progress_bar(order.current_amount, order.target_amount, width=32)
+    rule = "━" * 26
     description = (
-        f"# {emoji} {order.title}\n"
-        f"-# Ordre {format_order_number(order.order_number)}\n\n"
+        f"-# ORDRE PRIORITAIRE  ·  {format_order_number(order.order_number)}\n"
+        f"{rule}\n\n"
+        f"## BRIEFING\n"
         f"{order.description}\n\n"
-        f"### 📊 Progression — {percent}%\n"
+        f"## OBJECTIF  —  {percent}%\n"
         f"`{bar}`\n"
-        f"**{order.current_amount:,} / {order.target_amount:,}**"
+        f"# {order.current_amount:,}  /  {order.target_amount:,}"
         f"{close_line}"
     )
 
-    embed = discord.Embed(description=description, color=color)
+    embed = discord.Embed(
+        title=f"{emoji}   {order.title.upper()}",
+        description=description,
+        color=color,
+    )
     embed.add_field(
         name="⏰ Deadline",
         value=f"{discord_timestamp(deadline, 'F')}\nSe termine {discord_timestamp(deadline, 'R')}",
@@ -265,7 +272,10 @@ class ProgressModal(discord.ui.Modal, title="Ajouter une progression"):
 
 async def _load_order(session, order_id: int) -> Order | None:
     result = await session.execute(
-        select(Order).options(selectinload(Order.participants).selectinload(OrderParticipant.member)).where(Order.id == order_id)
+        select(Order)
+        .options(selectinload(Order.participants).selectinload(OrderParticipant.member))
+        .where(Order.id == order_id)
+        .execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
 

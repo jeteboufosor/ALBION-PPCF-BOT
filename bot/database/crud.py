@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import ContributionScore, Member, Order, TreasuryState, utcnow
+from bot.database.models import ContributionScore, Member, Order, Ticket, TreasuryState, utcnow
 
 
 async def get_member_by_discord_id(session: AsyncSession, discord_id: int) -> Member | None:
@@ -44,6 +44,11 @@ async def get_treasury_state(session: AsyncSession) -> TreasuryState:
 
 async def next_order_number(session: AsyncSession) -> int:
     result = await session.execute(select(func.coalesce(func.max(Order.order_number), 0) + 1))
+    return int(result.scalar_one())
+
+
+async def next_ticket_number(session: AsyncSession) -> int:
+    result = await session.execute(select(func.coalesce(func.max(Ticket.ticket_number), 0) + 1))
     return int(result.scalar_one())
 
 
