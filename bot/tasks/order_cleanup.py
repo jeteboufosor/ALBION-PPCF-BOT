@@ -33,7 +33,7 @@ async def run_order_cleanup(bot: commands.Bot) -> tuple[int, int]:
 
     for order in orders:
         ready = False
-        if order.status == "completed" and order.completed_at and order.completed_at <= cutoff:
+        if order.status in {"completed", "expired"} and order.completed_at and order.completed_at <= cutoff:
             ready = True
         if order.status == "cancelled" and order.cancelled_at and order.cancelled_at <= cutoff:
             ready = True

@@ -18,6 +18,7 @@ from bot.database.crud import get_or_create_member, next_order_number
 from bot.database.engine import session_scope
 from bot.database.models import ContributionScore, Order, OrderParticipant, utcnow
 from bot.utils.embeds import (
+    discord_timestamp,
     error_embed,
     format_order_number,
     info_embed,
@@ -86,41 +87,74 @@ def _reward_lines(order: Order) -> str:
     return "\n".join(lines)
 
 
+def _mention(discord_id: int | None) -> str:
+    if not discord_id:
+        return "—"
+    return f"<@{discord_id}>"
+
+
 def build_order_embed(order: Order) -> discord.Embed:
     label, points, color = PRIORITY_META.get(order.priority, ("?", 0, discord.Color.greyple()))
+    emoji = label.split()[0]
     percent = 0 if order.target_amount <= 0 else min(100, int(order.current_amount * 100 / order.target_amount))
     parts = sorted(order.participants, key=lambda p: p.contribution_amount, reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     people = []
-    for idx, part in enumerate(parts[:10]):
+    for idx, part in enumerate(parts[:15]):
         medal = medals[idx] if idx < 3 else "•"
         name = part.member.discord_name if part.member else f"#{part.member_id}"
-        people.append(f"{medal} {name} — {part.contribution_percent:.0f}% ({part.contribution_amount})")
-    deadline = order.deadline_at.astimezone(TZ).strftime("%d/%m/%Y %H:%M")
-    status = {"active": "Actif", "completed": "Terminé", "cancelled": "Annulé"}.get(order.status, order.status)
-    embed = discord.Embed(
-        title=f"{label.split()[0]} ORDRE {format_order_number(order.order_number)} — {order.title}",
-        description=order.description,
-        color=color,
-        timestamp=datetime.now(TZ),
+        mention = f"<@{part.member.discord_id}>" if part.member else name
+        people.append(f"{medal} {mention} — **{part.contribution_percent:.0f}%** ({part.contribution_amount})")
+
+    status_label = {
+        "active": "🟢 Actif",
+        "completed": "✔️ Terminé",
+        "cancelled": "❌ Annulé",
+        "expired": "⏰ Expiré",
+    }.get(order.status, order.status)
+
+    bar = progress_bar(order.current_amount, order.target_amount, width=28)
+    deadline = order.deadline_at
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=TZ)
+
+    close_line = ""
+    if order.status == "cancelled":
+        close_line = f"\n### ❌ Annulé par {_mention(order.cancelled_by_discord_id)}"
+        if order.cancelled_at:
+            close_line += f" — {discord_timestamp(order.cancelled_at, 'R')}"
+    elif order.status in {"completed", "expired"}:
+        who = "la deadline" if order.close_reason == "deadline" else _mention(order.completed_by_discord_id)
+        close_line = f"\n### ✔️ Clôturé par {who}"
+        if order.completed_at:
+            close_line += f" — {discord_timestamp(order.completed_at, 'R')}"
+
+    item_line = f"\n**Item :** {order.objective_item_name}" if order.objective_item_name else ""
+    description = (
+        f"# {emoji} ORDRE {format_order_number(order.order_number)}\n"
+        f"## {order.title}\n\n"
+        f"{order.description}\n\n"
+        f"### 📊 Progression — {percent}%\n"
+        f"`{bar}`\n"
+        f"**{order.current_amount:,} / {order.target_amount:,}**\n\n"
+        f"### ⏰ Deadline\n"
+        f"{discord_timestamp(deadline, 'F')}\n"
+        f"Se termine {discord_timestamp(deadline, 'R')}\n"
+        f"{close_line}"
     )
-    embed.add_field(
-        name="📊 Progression",
-        value=f"`[{progress_bar(order.current_amount, order.target_amount)}]` {percent}%\n{order.current_amount} / {order.target_amount}",
-        inline=False,
-    )
-    embed.add_field(name="⏰ Deadline", value=deadline, inline=True)
-    embed.add_field(name="📌 Statut", value=status, inline=True)
-    embed.add_field(name="🎯 Type", value=OBJECTIVE_TYPES.get(order.objective_type, order.objective_type), inline=True)
-    if order.objective_item_name:
-        embed.add_field(name="Item", value=order.objective_item_name, inline=True)
-    embed.add_field(name="🎁 Récompense", value=_reward_lines(order), inline=False)
+
+    embed = discord.Embed(description=description, color=color)
+    embed.add_field(name="📌 Statut", value=status_label, inline=True)
+    embed.add_field(name="🎯 Type", value=OBJECTIVE_TYPES.get(order.objective_type, order.objective_type) + item_line, inline=True)
+    embed.add_field(name="🏆 Points", value=f"+{points} / contributeur", inline=True)
+    embed.add_field(name="👤 Créé par", value=_mention(order.creator_discord_id), inline=True)
+    embed.add_field(name="🎁 Récompenses", value=_reward_lines(order), inline=False)
     embed.add_field(
         name=f"👥 Participants ({len(parts)})",
-        value="\n".join(people) or "Personne pour le moment",
+        value="\n".join(people) or "*Personne pour le moment — clique **Accepter***",
         inline=False,
     )
-    embed.set_footer(text=f"Points contributeurs : +{points} • Albion PPCF")
+    embed.set_footer(text="Albion PPCF • Fort Sterling")
     return embed
 
 
@@ -200,13 +234,21 @@ async def refresh_order_message(bot: commands.Bot, order: Order) -> None:
         LOGGER.exception("Maj message ordre #%s impossible", order.order_number)
 
 
-async def complete_order(bot: commands.Bot, order_id: int) -> Order | None:
+async def complete_order(
+    bot: commands.Bot,
+    order_id: int,
+    *,
+    actor_id: int | None = None,
+    reason: str = "manual",
+) -> Order | None:
     async with session_scope() as session:
         order = await _load_order(session, order_id)
         if order is None or order.status != "active":
             return None
-        order.status = "completed"
+        order.status = "expired" if reason == "deadline" else "completed"
         order.completed_at = utcnow()
+        order.completed_by_discord_id = actor_id
+        order.close_reason = reason
         _, points, _ = PRIORITY_META.get(order.priority, ("", 0, None))
         contributors = [p for p in order.participants if p.contribution_amount > 0]
         contributors.sort(key=lambda p: p.contribution_amount, reverse=True)
@@ -442,11 +484,16 @@ class Orders(commands.Cog):
                         return
                     order.status = "cancelled"
                     order.cancelled_at = utcnow()
+                    order.cancelled_by_discord_id = user.id
+                    order.close_reason = "manual"
                     await refresh_order_message(self.bot, order)
-                await interaction.response.send_message(embed=warning_embed("Ordre annulé"), ephemeral=True)
+                await interaction.response.send_message(
+                    embed=warning_embed("Ordre annulé", f"Annulé par {user.mention}"),
+                    ephemeral=True,
+                )
                 return
             await interaction.response.defer(ephemeral=True)
-            done = await complete_order(self.bot, order_id)
+            done = await complete_order(self.bot, order_id, actor_id=user.id, reason="manual")
             if done is None:
                 await interaction.followup.send(embed=error_embed("Impossible de terminer"), ephemeral=True)
             else:
