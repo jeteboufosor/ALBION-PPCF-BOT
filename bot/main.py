@@ -50,10 +50,23 @@ class AlbionGuildBot(commands.Bot):
                 guild = discord.Object(id=settings.guild_id)
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
-                self.logger.info("%s commande(s) slash synchronisée(s) sur la guilde %s", len(synced), settings.guild_id)
+                self.logger.info(
+                    "%s commande(s) slash synchronisée(s) sur la guilde %s: %s",
+                    len(synced),
+                    settings.guild_id,
+                    ", ".join(f"/{command.name}" for command in synced) or "aucune",
+                )
             else:
                 synced = await self.tree.sync()
-                self.logger.info("%s commande(s) slash globale(s) synchronisée(s)", len(synced))
+                self.logger.info(
+                    "%s commande(s) slash globale(s) synchronisée(s): %s",
+                    len(synced),
+                    ", ".join(f"/{command.name}" for command in synced) or "aucune",
+                )
+            if not synced:
+                self.logger.warning(
+                    "Aucune commande à synchroniser: vérifiez que les cogs exposant des slash commands sont bien chargés."
+                )
 
     async def _load_available_cogs(self) -> None:
         """Charge tous les modules bot.cogs.* qui exposent setup(bot)."""
