@@ -192,13 +192,20 @@ async def process_deployment_timers(bot: commands.Bot) -> None:
                 loaded.reminder_sent_at = now
                 people = [r for r in loaded.responses if r.response in {"yes", "maybe"} and r.member]
             for resp in people:
-                user = bot.get_user(resp.member.discord_id)
+                uid = resp.member.discord_id
+                user = bot.get_user(uid)
                 if user is None:
-                    continue
+                    try:
+                        user = await bot.fetch_user(uid)
+                    except discord.HTTPException:
+                        continue
                 try:
-                    await user.send(f"🐴 Déploiement **{dep.activity_type}** dans 10 min — {discord_timestamp(starts, 'R')}")
+                    await user.send(
+                        f"🐴 Rappel : déploiement **{dep.activity_type}** dans 10 min.\n"
+                        f"Départ {discord_timestamp(starts, 'F')} ({discord_timestamp(starts, 'R')})"
+                    )
                 except discord.HTTPException:
-                    pass
+                    LOGGER.info("DM rappel déploiement impossible pour %s", uid)
         if now >= starts:
             async with session_scope() as session:
                 loaded = await _load_deploy(session, dep.id)

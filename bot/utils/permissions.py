@@ -23,6 +23,8 @@ CHANNEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "arrival_departure": ("arriv",),
     "deployment": ("deploi", "deploy"),
     "promotion": ("promo",),
+    "battlefield": ("champ", "bataille", "killboard", "kill"),
+    "market_commands": ("marche", "market", "commandes-marche"),
 }
 
 

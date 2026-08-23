@@ -61,4 +61,10 @@ class MarketAPIClient:
     ) -> list[dict[str, Any]]:
         """Historique de prix. date peut être au format attendu par l'API."""
 
-        return await self._get(f"history/{item_id}", locations=location, date=date, qualities=qualities)
+        return await self._get(
+            f"history/{item_id}",
+            locations=location,
+            date=date,
+            qualities=qualities,
+            **{"time-scale": 24},
+        )
