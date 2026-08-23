@@ -42,6 +42,16 @@ Après redéploiement, tape `/` dans Discord. Si rien n’apparaît, redémarre 
 - Clique les boutons du panneau #rôles (toggle)
 - `/test_roles` — état enregistré en base
 
+## Phase 3 — Ordres + quêtes
+
+- `/ordre_creer` — titre, description, priorité, objectif, type, deadline `JJ/MM/AAAA HH:MM`, récompenses
+- `/ordre_info numero:` — fiche d'un ordre
+- `/quete` — mini-ordre max 3 dans #tableau-des-quêtes
+- `/test_cleanup_ordres` — force l'archivage (24h / 6h)
+
+Boutons ordre : Accepter / Progression (gestionnaires) / Terminer / Annuler.  
+En `TEST_MODE=true` tout le monde peut créer/terminer.
+
 ## Parcours de test recommandé
 
 1. `/setup` → corrige les noms de rôles/salons s’ils sont listés manquants

@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from bot.config import settings
 from bot.database.engine import dispose_engine, init_db
+from bot.tasks.scheduler import start_scheduler, stop_scheduler
 
 
 def configure_logging() -> None:
@@ -44,6 +45,7 @@ class AlbionGuildBot(commands.Bot):
 
         await init_db()
         await self._load_available_cogs()
+        start_scheduler(self)
 
         if settings.sync_commands_on_start:
             if settings.guild_id:
@@ -90,6 +92,7 @@ class AlbionGuildBot(commands.Bot):
         self.logger.info("Connecté en tant que %s (%s) | Guildes: %s", self.user, self.user.id if self.user else "?", guilds)
 
     async def close(self) -> None:
+        stop_scheduler()
         await super().close()
         await dispose_engine()
 

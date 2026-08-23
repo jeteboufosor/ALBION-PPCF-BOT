@@ -71,7 +71,15 @@ class ProfileOpenView(discord.ui.View):
         custom_id=PROFILE_CUSTOM_ID,
     )
     async def open_profile(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
-        await interaction.response.send_modal(ProfileModal())
+        try:
+            await interaction.response.send_modal(ProfileModal())
+        except discord.HTTPException:
+            LOGGER.exception("Impossible d'ouvrir le modal profil")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Le formulaire n'a pas pu s'ouvrir. Utilise `/completer_profil`.",
+                    ephemeral=True,
+                )
 
 
 class ProfileModal(discord.ui.Modal, title="Profil de guilde"):
@@ -291,16 +299,18 @@ def build_guide_embed() -> discord.Embed:
     return embed
 
 
-def build_welcome_embed(member: discord.Member | discord.User, member_count: int) -> discord.Embed:
+def build_welcome_embed(member: discord.Member | discord.User) -> discord.Embed:
     embed = success_embed(
-        f"🎉 Bienvenue {member.display_name} dans la guilde !",
+        f"🎉 Bienvenue {member.display_name} !",
         (
-            f"Nous sommes maintenant **{member_count}** membres.\n"
-            "Va lire les règles dans #règles **et** complète ton profil."
+            "Lis les **règles** puis clique **Compléter mon profil** "
+            "(ou tape `/completer_profil` si le bouton ne répond pas).\n"
+            "Les deux étapes sont nécessaires pour passer Recrue."
         ),
     )
-    if isinstance(member, discord.Member) and member.display_avatar:
-        embed.set_thumbnail(url=member.display_avatar.url)
+    avatar = getattr(member, "display_avatar", None)
+    if avatar is not None:
+        embed.set_thumbnail(url=avatar.url)
     return embed
 
 
@@ -343,13 +353,13 @@ class Onboarding(commands.Cog):
         if arrival is not None:
             await arrival.send(
                 content=member.mention,
-                embed=build_welcome_embed(member, guild.member_count or 0),
+                embed=build_welcome_embed(member),
                 view=ProfileOpenView(),
             )
 
         try:
             await member.send(
-                embed=build_welcome_embed(member, guild.member_count or 0),
+                embed=build_welcome_embed(member),
                 view=ProfileOpenView(),
             )
         except discord.Forbidden:
@@ -409,6 +419,10 @@ class Onboarding(commands.Cog):
             embed=success_embed("Onboarding posté", "Salons : " + ", ".join(posted)),
             ephemeral=True,
         )
+
+    @app_commands.command(name="completer_profil", description="Ouvre le formulaire de profil (même action que le bouton).")
+    async def completer_profil(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ProfileModal())
 
     @app_commands.command(name="profil", description="Affiche ton profil de guilde.")
     async def profil(self, interaction: discord.Interaction) -> None:
