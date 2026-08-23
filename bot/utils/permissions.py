@@ -35,10 +35,40 @@ def can_manage_treasury(member: discord.Member) -> bool:
     return is_guild_master(member) or has_any_role(member, ("grand_treasurer",))
 
 
+def _normalize_label(value: str) -> str:
+    """Normalise un nom de salon/rôle (emoji, espaces, casse)."""
+
+    cleaned = "".join(ch for ch in value.lower() if ch.isalnum() or ch in {"-", "_", " "})
+    return cleaned.replace("_", "-").replace(" ", "-").strip("-")
+
+
 def role_by_name(guild: discord.Guild, role_name: str) -> discord.Role | None:
-    return discord.utils.get(guild.roles, name=role_name)
+    exact = discord.utils.get(guild.roles, name=role_name)
+    if exact is not None:
+        return exact
+    target = _normalize_label(role_name)
+    for role in guild.roles:
+        if _normalize_label(role.name) == target or target in _normalize_label(role.name):
+            return role
+    return None
 
 
 def channel_by_name(guild: discord.Guild, channel_name: str) -> discord.TextChannel | None:
     channel = discord.utils.get(guild.text_channels, name=channel_name)
-    return channel if isinstance(channel, discord.TextChannel) else None
+    if isinstance(channel, discord.TextChannel):
+        return channel
+    target = _normalize_label(channel_name)
+    for text_channel in guild.text_channels:
+        if _normalize_label(text_channel.name) == target or target in _normalize_label(text_channel.name):
+            return text_channel
+    return None
+
+
+def find_role(guild: discord.Guild, key: str) -> discord.Role | None:
+    return role_by_name(guild, ROLE_NAMES.get(key, key))
+
+
+def find_channel(guild: discord.Guild, key: str) -> discord.TextChannel | None:
+    from bot.config import CHANNEL_NAMES
+
+    return channel_by_name(guild, CHANNEL_NAMES.get(key, key))

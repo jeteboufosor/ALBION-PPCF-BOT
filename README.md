@@ -1,135 +1,54 @@
 # Albion PPCF Bot Discord
 
-Bot Discord async pour une guilde Albion Online basée à Fort Sterling.
+Bot Discord async pour une guilde Albion Online (Fort Sterling).
 
-Ce dépôt est développé en 7 phases. La **Phase 1 — Fondations** met en place l'architecture, la configuration, la base de données async, les modèles, les utilitaires et les clients API.
+**Phase 2 — Onboarding + rôles** (Phase 1 déjà en place).
 
-## Stack
+## Railway
 
-- Python 3.11+
-- discord.py 2.x avec slash commands
-- SQLAlchemy 2.0 async (`Mapped[]`, `mapped_column()`)
-- SQLite local via `aiosqlite`
-- PostgreSQL Railway via `asyncpg`
-- httpx
-- APScheduler
-- python-dotenv
-
-## Structure
-
-```text
-bot/
-├── main.py
-├── config.py
-├── cogs/
-├── services/
-│   ├── albion_api.py
-│   ├── market_api.py
-│   └── item_service.py
-├── database/
-│   ├── engine.py
-│   ├── models.py
-│   └── crud.py
-├── tasks/
-└── utils/
-    ├── cache.py
-    ├── embeds.py
-    ├── permissions.py
-    └── helpers.py
-```
-
-## Installation locale
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Renseignez au minimum dans `.env` :
-
-```env
-DISCORD_TOKEN=token_du_bot
-GUILD_ID=id_du_serveur_discord
-ALBION_GUILD_ID=id_de_la_guilde_albion
-```
-
-En local, laissez `DATABASE_URL` vide. Le bot utilisera automatiquement :
-
-```text
-sqlite+aiosqlite:///./data/albion_guild_bot.db
-```
-
-## Lancer le bot
-
-```bash
-python -m bot.main
-```
-
-Au démarrage, le bot :
-
-1. charge les variables `.env`,
-2. détecte SQLite ou PostgreSQL,
-3. crée les tables manquantes,
-4. charge automatiquement les cogs présents dans `bot/cogs`,
-5. synchronise les slash commands.
-
-## Base de données
-
-La détection se fait dans `bot/database/engine.py` :
-
-- `DATABASE_URL` vide → SQLite local avec `aiosqlite` ;
-- `postgresql://...` ou `postgres://...` → conversion automatique en `postgresql+asyncpg://...` pour Railway ;
-- `postgresql+asyncpg://...` → utilisé tel quel.
-
-Les modèles de la Phase 1 couvrent toutes les tables prévues : membres, ordres, quêtes, contributions, trésorerie, tickets, déploiements, promotions, killboard, marché, snapshots fame, backups et santé bot.
-
-## Déploiement Railway
-
-Les fichiers nécessaires sont déjà présents :
-
-- `Procfile` : `worker: python -m bot.main`
-- `runtime.txt` : `3.11`
-- `requirements.txt`
-
-Variables Railway à prévoir :
+Variables déjà prévues :
 
 ```env
 DISCORD_TOKEN=...
 GUILD_ID=...
 ALBION_GUILD_ID=...
-DATABASE_URL=... # fourni par PostgreSQL Railway
+DATABASE_URL=...          # PostgreSQL Railway
+TEST_MODE=true            # laisse true le temps des tests
+SYNC_COMMANDS_ON_START=true
 ```
 
-Le code convertit automatiquement l'URL Railway PostgreSQL vers le driver asyncpg.
+Passe `TEST_MODE=false` en production pour restreindre les commandes `/test_*` et les setups aux officiers.
 
-## Tester la Phase 1
+## Commandes slash à tester
 
-Sans lancer Discord, vérifiez la syntaxe et la création de DB :
+Après redéploiement, tape `/` dans Discord. Si rien n’apparaît, redémarre le worker Railway (sync au boot).
 
-```bash
-python -m compileall bot
-python - <<'PY'
-import asyncio
-from bot.database.engine import init_db, dispose_engine, DATABASE_URL
+### Diagnostic
+- `/ping` — latence
+- `/setup` — rôles / salons manquants
+- `/test_statut` — flags onboarding + TEST_MODE
 
-async def main():
-    print(DATABASE_URL)
-    await init_db()
-    await dispose_engine()
+### Setup des panneaux (une fois)
+- `/setup_onboarding` — poste règles + guide + bouton ✅
+- `/setup_roles` — poste les 6 boutons de classes dans #rôles
 
-asyncio.run(main())
-PY
-```
+### Onboarding
+- `/test_welcome` — simule ton arrivée (rôle Non vérifié + embed + bouton)
+- `/test_reset_profil` — remet règles/profil à zéro
+- `/test_validation` — force Recrue
+- `/profil` `/profil_pseudo` `/profil_role`
 
-Vous devez obtenir une base SQLite dans `data/` si `DATABASE_URL` est vide.
+### Rôles
+- Clique les boutons du panneau #rôles (toggle)
+- `/test_roles` — état enregistré en base
 
-## Phases suivantes
+## Parcours de test recommandé
 
-- Phase 2 : onboarding + salon rôles
-- Phase 3 : ordres prioritaires + quêtes
-- Phase 4 : trésorerie + tickets
-- Phase 5 : déploiement + promotion
-- Phase 6 : marché + killboard
-- Phase 7 : leaderboard + backup + admin + tâches finales
+1. `/setup` → corrige les noms de rôles/salons s’ils sont listés manquants
+2. `/setup_onboarding` puis `/setup_roles`
+3. `/test_reset_profil`
+4. Accepte les règles + complète le profil (ou `/test_welcome` puis le formulaire)
+5. Vérifie #arrivé-départ et le passage **Non vérifié → Recrue**
+6. Toggle Tank / DPS / etc. puis `/test_roles`
+
+Le bot doit pouvoir **gérer les rôles** (rôle bot au-dessus de Recrue / Non vérifié / classes).

@@ -64,6 +64,7 @@ class General(commands.Cog):
             value=(
                 f"GUILD_ID: `{settings.guild_id or 'non défini'}`\n"
                 f"Base de données: `{'PostgreSQL' if settings.database_url else 'SQLite'}`\n"
+                f"Mode test: `{settings.test_mode}`\n"
                 f"Sync au démarrage: `{settings.sync_commands_on_start}`"
             ),
             inline=False,

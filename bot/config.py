@@ -61,6 +61,7 @@ class Settings:
     command_prefix: str = field(default_factory=lambda: os.getenv("COMMAND_PREFIX", "!"))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     sync_commands_on_start: bool = field(default_factory=lambda: _bool_env("SYNC_COMMANDS_ON_START", True))
+    test_mode: bool = field(default_factory=lambda: _bool_env("TEST_MODE", True))
     default_timezone: str = field(default_factory=lambda: os.getenv("DEFAULT_TIMEZONE", "UTC"))
 
     alerts_channel_id: int | None = field(default_factory=lambda: _int_env("ALERTS_CHANNEL_ID"))

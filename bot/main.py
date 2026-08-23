@@ -97,7 +97,7 @@ class AlbionGuildBot(commands.Bot):
 async def run_bot() -> None:
     configure_logging()
     if not settings.discord_token:
-        raise RuntimeError("DISCORD_TOKEN manquant. Copiez .env.example vers .env et renseignez le token.")
+        raise RuntimeError("DISCORD_TOKEN manquant. Configure-le dans Railway (Variables).")
 
     bot = AlbionGuildBot()
     async with bot:
