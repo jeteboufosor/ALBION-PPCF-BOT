@@ -152,16 +152,7 @@ class LeaderboardView(discord.ui.View):
         super().__init__(timeout=None)
         for key in CATS:
             self.add_item(LeaderboardNavItem("cat", cat, period, key))
-        self.add_item(LeaderboardNavItem("per", cat, period, "left"))
-        self.add_item(
-            discord.ui.Button(
-                label=PERIOD_META[period]["label"],
-                style=discord.ButtonStyle.secondary,
-                disabled=True,
-                custom_id=f"lb:per:{cat}:{period}:{period}",
-            )
-        )
-        self.add_item(LeaderboardNavItem("per", cat, period, "right"))
+        self.add_item(LeaderboardNavItem("per", cat, period, "toggle"))
 
 
 class Leaderboard(commands.Cog):
@@ -216,22 +207,29 @@ class Leaderboard(commands.Cog):
             except (AlbionAPIError, Exception):
                 LOGGER.debug("Fame skip %s", member.albion_name)
 
-    async def post_or_update(self, guild: discord.Guild, *, cat: str = "ordres", period: str = "month") -> None:
+    async def post_or_update(self, guild: discord.Guild, *, cat: str = "ordres", period: str = "month") -> discord.TextChannel:
         channel = find_channel(guild, "leaderboard")
         if channel is None:
-            return
-        await self.refresh_fame_from_api()
+            raise RuntimeError(
+                "Salon leaderboard introuvable. Nom attendu : `#🏆 leaderboard` "
+                "(ou un salon dont le nom contient « leaderboard » / « classement »)."
+            )
+        try:
+            await self.refresh_fame_from_api()
+        except Exception:
+            LOGGER.exception("Refresh fame ignoré pour le setup leaderboard")
         embed = await build_leaderboard_embed(cat, period)
         view = LeaderboardView(cat, period)
         if self._message_id:
             try:
                 msg = await channel.fetch_message(self._message_id)
                 await msg.edit(embed=embed, view=view)
-                return
+                return channel
             except discord.HTTPException:
                 pass
         msg = await channel.send(embed=embed, view=view)
         self._message_id = msg.id
+        return channel
 
     @app_commands.command(name="leaderboard", description="Affiche le classement (1 embed, boutons de nav).")
     @app_commands.choices(
@@ -262,8 +260,16 @@ class Leaderboard(commands.Cog):
     async def setup_leaderboard(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         assert interaction.guild
-        await self.post_or_update(interaction.guild)
-        await interaction.followup.send("Leaderboard posté / mis à jour (1 embed + boutons).", ephemeral=True)
+        try:
+            channel = await self.post_or_update(interaction.guild)
+        except Exception as exc:
+            LOGGER.exception("setup_leaderboard a échoué")
+            await interaction.followup.send(f"Impossible de poster le classement : {exc}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Classement posté dans {channel.mention} (1 embed + boutons).",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
