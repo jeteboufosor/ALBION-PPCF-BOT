@@ -475,16 +475,17 @@ class Orders(commands.Cog):
         recompense_autres: str | None = None,
         item: str | None = None,
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_manage(interaction.user):
-            await interaction.response.send_message("Seuls Seigneur de Guerre / Grand Trésorier (ou mode test).", ephemeral=True)
+            await interaction.followup.send("Seuls Seigneur de Guerre / Grand Trésorier (ou mode test).", ephemeral=True)
             return
         if objectif <= 0:
-            await interaction.response.send_message(embed=error_embed("Objectif invalide"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Objectif invalide"), ephemeral=True)
             return
         try:
             ends = _parse_deadline(deadline)
         except ValueError as exc:
-            await interaction.response.send_message(embed=error_embed("Deadline", str(exc)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Deadline", str(exc)), ephemeral=True)
             return
 
         guild = interaction.guild
@@ -527,7 +528,7 @@ class Orders(commands.Cog):
             loaded.channel_id = channel.id
             loaded.message_id = message.id
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=success_embed("Ordre créé", f"{format_order_number(number)} posté dans {channel.mention}"),
             ephemeral=True,
         )

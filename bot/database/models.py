@@ -240,6 +240,7 @@ class ResourceRequest(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     item_name: Mapped[str] = mapped_column(String(180), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_quantity: Mapped[int | None] = mapped_column(Integer)
     requester_member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"))
     reason: Mapped[str | None] = mapped_column(Text)
     urgency: Mapped[str | None] = mapped_column(String(30))

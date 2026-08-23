@@ -65,12 +65,14 @@ async def _add_missing_order_columns(conn) -> None:
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by_discord_id BIGINT",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by_discord_id BIGINT",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS close_reason VARCHAR(40)",
+        "ALTER TABLE resource_requests ADD COLUMN IF NOT EXISTS original_quantity INTEGER",
     )
     if IS_SQLITE:
         statements = (
             "ALTER TABLE orders ADD COLUMN cancelled_by_discord_id BIGINT",
             "ALTER TABLE orders ADD COLUMN completed_by_discord_id BIGINT",
             "ALTER TABLE orders ADD COLUMN close_reason VARCHAR(40)",
+            "ALTER TABLE resource_requests ADD COLUMN original_quantity INTEGER",
         )
     for stmt in statements:
         try:

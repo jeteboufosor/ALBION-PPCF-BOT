@@ -3,26 +3,30 @@
 from __future__ import annotations
 
 import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.database.crud import get_or_create_member, get_treasury_state, next_ticket_number
+from bot.database.crud import get_or_create_member, next_ticket_number
 from bot.database.engine import session_scope
-from bot.database.models import ContributionScore, GuildDonation, Ticket, TreasuryTransaction, utcnow
-from bot.utils.embeds import error_embed, format_silver, info_embed, success_embed, warning_embed
+from bot.database.models import Ticket, utcnow
+from bot.utils.embeds import error_embed, info_embed, success_embed, warning_embed
 from bot.utils.permissions import can_manage_treasury, find_channel, find_role, is_officer
 
 LOGGER = logging.getLogger(__name__)
 
 TICKET_TYPES = {
     "donate": "💰 Don",
+    "order": "🎯 Ordre prioritaire",
     "craft": "🔨 Craft / ressource",
     "report": "⚠️ Problème",
     "other": "💬 Autre",
 }
+
+NOTIFY_TYPES = {"donate", "order", "craft"}
 
 
 def _staff_overwrites(guild: discord.Guild, opener: discord.Member) -> dict:
@@ -51,32 +55,55 @@ async def _tickets_category(guild: discord.Guild) -> discord.CategoryChannel | N
         return None
 
 
+async def notify_treasurers(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View | None = None) -> None:
+    for member in guild.members:
+        if member.bot:
+            continue
+        if can_manage_treasury(member):
+            try:
+                await member.send(embed=embed, view=view)
+                if view is not None:
+                    view.stop()
+            except discord.HTTPException:
+                continue
+
+
 class TicketCloseView(discord.ui.View):
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Fermer", emoji="🔒", style=discord.ButtonStyle.danger, custom_id=f"ticket:close:{ticket_id}"))
+        self.add_item(
+            discord.ui.Button(label="Fermer", emoji="🔒", style=discord.ButtonStyle.danger, custom_id=f"ticket:close:{ticket_id}")
+        )
 
 
 class DonationReviewView(discord.ui.View):
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Approuver", emoji="✅", style=discord.ButtonStyle.success, custom_id=f"ticket:approve:{ticket_id}"))
-        self.add_item(discord.ui.Button(label="Refuser", emoji="❌", style=discord.ButtonStyle.danger, custom_id=f"ticket:deny:{ticket_id}"))
+        self.add_item(
+            discord.ui.Button(label="Approuver", emoji="✅", style=discord.ButtonStyle.success, custom_id=f"ticket:approve:{ticket_id}")
+        )
+        self.add_item(
+            discord.ui.Button(label="Refuser", emoji="❌", style=discord.ButtonStyle.danger, custom_id=f"ticket:deny:{ticket_id}")
+        )
 
 
 class DeclarationView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Faire un don", emoji="💰", style=discord.ButtonStyle.success, custom_id="ticket:open:donate")
+    @discord.ui.button(label="Don", emoji="💰", style=discord.ButtonStyle.success, custom_id="ticket:open:donate")
     async def donate(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await handle_ticket_button(interaction, "open", "donate")
 
-    @discord.ui.button(label="Craft / ressource", emoji="🔨", style=discord.ButtonStyle.primary, custom_id="ticket:open:craft")
+    @discord.ui.button(label="Ordre prio", emoji="🎯", style=discord.ButtonStyle.primary, custom_id="ticket:open:order")
+    async def order(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        await handle_ticket_button(interaction, "open", "order")
+
+    @discord.ui.button(label="Craft / stuff", emoji="🔨", style=discord.ButtonStyle.primary, custom_id="ticket:open:craft")
     async def craft(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await handle_ticket_button(interaction, "open", "craft")
 
-    @discord.ui.button(label="Signaler un problème", emoji="⚠️", style=discord.ButtonStyle.danger, custom_id="ticket:open:report")
+    @discord.ui.button(label="Problème", emoji="⚠️", style=discord.ButtonStyle.danger, custom_id="ticket:open:report")
     async def report(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await handle_ticket_button(interaction, "open", "report")
 
@@ -86,39 +113,89 @@ class DeclarationView(discord.ui.View):
 
 
 class DonateModal(discord.ui.Modal, title="Déclarer un don"):
-    kind = discord.ui.TextInput(label="Type (silver ou item)", placeholder="silver", required=True, max_length=10)
+    kind = discord.ui.TextInput(label="Type", placeholder="silver  ou  item", required=True, max_length=10)
     amount = discord.ui.TextInput(label="Montant / quantité", placeholder="500000", required=True, max_length=16)
-    extra = discord.ui.TextInput(label="Nom item ou n° ordre (optionnel)", required=False, max_length=80)
+    extra = discord.ui.TextInput(label="Nom de l'item (si item)", required=False, max_length=80)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await create_ticket(
             interaction,
             "donate",
-            f"{self.kind} · {self.amount}",
-            f"Type: {self.kind}\nQuantité: {self.amount}\nDétail: {self.extra or '—'}",
+            f"Don {self.kind} × {self.amount}",
+            f"**Type :** {self.kind}\n**Quantité :** {self.amount}\n**Item :** {self.extra or '—'}",
         )
 
 
-class FreeModal(discord.ui.Modal):
-    titre = discord.ui.TextInput(label="Titre", required=True, max_length=80)
-    details = discord.ui.TextInput(label="Description", style=discord.TextStyle.paragraph, required=True, max_length=1000)
-
-    def __init__(self, ticket_type: str) -> None:
-        super().__init__(title=TICKET_TYPES.get(ticket_type, "Déclaration"))
-        self.ticket_type = ticket_type
+class OrderTicketModal(discord.ui.Modal, title="Lier un ordre prioritaire"):
+    numero = discord.ui.TextInput(label="Numéro d'ordre", placeholder="7", required=True, max_length=8)
+    details = discord.ui.TextInput(
+        label="Ce que tu apportes",
+        style=discord.TextStyle.paragraph,
+        placeholder="Ex: 200 minerai T6 déjà farm",
+        required=True,
+        max_length=800,
+    )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await create_ticket(interaction, self.ticket_type, str(self.titre), str(self.details))
+        await create_ticket(
+            interaction,
+            "order",
+            f"Ordre #{str(self.numero).strip()}",
+            f"**Ordre :** #{str(self.numero).strip()}\n**Contribution :**\n{self.details}",
+        )
+
+
+class CraftModal(discord.ui.Modal, title="Demande craft / ressource"):
+    item = discord.ui.TextInput(label="Item ou équipement", placeholder="Ex: bois T6 / set Guardian", required=True, max_length=120)
+    quantite = discord.ui.TextInput(label="Quantité", placeholder="100", required=True, max_length=12)
+    raison = discord.ui.TextInput(label="Pourquoi / urgence", style=discord.TextStyle.paragraph, required=True, max_length=800)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await create_ticket(
+            interaction,
+            "craft",
+            f"{self.quantite}× {self.item}",
+            f"**Besoin :** {self.item}\n**Quantité :** {self.quantite}\n**Motif :**\n{self.raison}",
+        )
+
+
+class ReportModal(discord.ui.Modal, title="Signaler un problème"):
+    titre = discord.ui.TextInput(label="Titre court", placeholder="Ex: Comportement en ZvZ", required=True, max_length=80)
+    quand = discord.ui.TextInput(label="Quand / où", placeholder="Hier soir, Roads", required=False, max_length=120)
+    details = discord.ui.TextInput(label="Décris les faits", style=discord.TextStyle.paragraph, required=True, max_length=1000)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await create_ticket(
+            interaction,
+            "report",
+            str(self.titre),
+            f"**Contexte :** {self.quand or '—'}\n\n**Faits :**\n{self.details}",
+        )
+
+
+class OtherModal(discord.ui.Modal, title="Autre demande"):
+    titre = discord.ui.TextInput(label="Sujet", required=True, max_length=80)
+    details = discord.ui.TextInput(label="Détails", style=discord.TextStyle.paragraph, required=True, max_length=1000)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await create_ticket(
+            interaction,
+            "other",
+            str(self.titre),
+            f"**Demande :**\n{self.details}",
+        )
 
 
 async def create_ticket(interaction: discord.Interaction, ticket_type: str, title: str, description: str) -> None:
     guild = interaction.guild
     user = interaction.user
     if guild is None or not isinstance(user, discord.Member):
-        await interaction.response.send_message("Utilise cette action sur le serveur.", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message("Utilise cette action sur le serveur.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
     category = await _tickets_category(guild)
     async with session_scope() as session:
         member = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
@@ -149,25 +226,30 @@ async def create_ticket(interaction: discord.Interaction, ticket_type: str, titl
         await session.flush()
         ticket_id = ticket.id
 
-    embed = info_embed(f"🎫 Ticket #{number:03d} — {TICKET_TYPES[ticket_type]}", description)
+    embed = discord.Embed(
+        description=(
+            f"-# TICKET  #{number:03d}\n"
+            f"## {TICKET_TYPES[ticket_type]}\n\n"
+            f"{description}"
+        ),
+        color=discord.Color.orange(),
+    )
     embed.add_field(name="Auteur", value=user.mention, inline=True)
     embed.add_field(name="Sujet", value=title, inline=True)
     close_view = TicketCloseView(ticket_id)
     await channel.send(content=user.mention, embed=embed, view=close_view)
     close_view.stop()
 
-    if ticket_type == "donate":
-        for member_obj in guild.members:
-            if can_manage_treasury(member_obj) and not member_obj.bot:
-                try:
-                    review = DonationReviewView(ticket_id)
-                    await member_obj.send(
-                        embed=warning_embed("Don à valider", f"{user.mention} — {title}\n{channel.mention}"),
-                        view=review,
-                    )
-                    review.stop()
-                except discord.HTTPException:
-                    pass
+    if ticket_type in NOTIFY_TYPES:
+        review = DonationReviewView(ticket_id) if ticket_type == "donate" else None
+        await notify_treasurers(
+            guild,
+            warning_embed(
+                f"Nouveau ticket — {TICKET_TYPES[ticket_type]}",
+                f"{user.mention}\n{title}\n{channel.mention}",
+            ),
+            review,
+        )
 
     await interaction.followup.send(embed=success_embed("Ticket ouvert", channel.mention), ephemeral=True)
 
@@ -191,7 +273,9 @@ async def close_ticket(bot: commands.Bot, ticket_id: int, closer_id: int) -> Non
     if isinstance(channel, discord.TextChannel):
         guild = channel.guild
         async for msg in channel.history(limit=50, oldest_first=True):
-            transcript.append(f"**{msg.author.display_name}**: {msg.content[:200]}" if msg.content else f"**{msg.author.display_name}**: *(embed)*")
+            transcript.append(
+                f"**{msg.author.display_name}**: {msg.content[:200]}" if msg.content else f"**{msg.author.display_name}**: *(embed)*"
+            )
         try:
             await channel.delete(reason="Ticket fermé")
         except discord.HTTPException:
@@ -204,7 +288,7 @@ async def close_ticket(bot: commands.Bot, ticket_id: int, closer_id: int) -> Non
             await logs.send(
                 embed=info_embed(
                     f"📁 Ticket #{number:03d} fermé",
-                    f"Type: {TICKET_TYPES.get(ttype, ttype)}\nSujet: {title}\n\n{body[:1800]}",
+                    f"**Type :** {TICKET_TYPES.get(ttype, ttype)}\n**Sujet :** {title}\n\n{body[:1800]}",
                 )
             )
 
@@ -212,23 +296,27 @@ async def close_ticket(bot: commands.Bot, ticket_id: int, closer_id: int) -> Non
 async def handle_ticket_button(interaction: discord.Interaction, action: str, payload: str) -> None:
     user = interaction.user
     if action == "open":
-        if payload == "donate":
-            await interaction.response.send_modal(DonateModal())
-        else:
-            await interaction.response.send_modal(FreeModal(payload))
+        modals = {
+            "donate": DonateModal,
+            "order": OrderTicketModal,
+            "craft": CraftModal,
+            "report": ReportModal,
+            "other": OtherModal,
+        }
+        modal_cls = modals.get(payload)
+        if modal_cls is None:
+            return
+        await interaction.response.send_modal(modal_cls())
         return
 
     ticket_id = int(payload)
     if action == "close":
         await interaction.response.defer(ephemeral=True)
         await close_ticket(interaction.client, ticket_id, user.id)
-        if not interaction.response.is_done():
+        try:
             await interaction.followup.send("Ticket fermé.", ephemeral=True)
-        else:
-            try:
-                await interaction.followup.send("Ticket fermé.", ephemeral=True)
-            except discord.HTTPException:
-                pass
+        except discord.HTTPException:
+            pass
         return
 
     if action in {"approve", "deny"}:
@@ -236,58 +324,16 @@ async def handle_ticket_button(interaction: discord.Interaction, action: str, pa
             await interaction.response.send_message("Réservé au trésorier.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        async with session_scope() as session:
-            ticket = await session.get(Ticket, ticket_id)
-            if ticket is None:
-                await interaction.followup.send("Ticket introuvable.", ephemeral=True)
-                return
-            desc = ticket.description or ""
-            member_id = ticket.member_id
-            if action == "approve" and ticket.ticket_type == "donate":
-                amount = 0
-                for line in desc.splitlines():
-                    if line.lower().startswith("quantité"):
-                        raw = "".join(ch for ch in line if ch.isdigit())
-                        if raw:
-                            amount = int(raw)
-                kind = "silver" if "silver" in desc.lower() else "item"
-                donation = GuildDonation(
-                    member_id=member_id,
-                    donation_type=kind,
-                    amount=amount or 0,
-                    note=desc,
-                    approved_by_discord_id=user.id,
-                    approved_at=utcnow(),
-                    ticket_id=ticket.id,
-                )
-                session.add(donation)
-                if kind == "silver" and amount:
-                    state = await get_treasury_state(session)
-                    state.current_balance += amount
-                    state.total_deposited += amount
-                    session.add(
-                        TreasuryTransaction(
-                            transaction_type="donation",
-                            amount=amount,
-                            balance_after=state.current_balance,
-                            note="Don validé via ticket",
-                            author_discord_id=user.id,
-                        )
-                    )
-                    score = await session.scalar(select(ContributionScore).where(ContributionScore.member_id == member_id))
-                    if score:
-                        score.total_silver_donated += amount
-        if action == "approve":
-            if interaction.guild:
-                from bot.cogs.treasury import log_history, refresh_treasury_panel
+        if action == "approve" and interaction.guild:
+            from bot.cogs.treasury import log_history, refresh_treasury_panel
 
-                await refresh_treasury_panel(interaction.client, interaction.guild)
-                await log_history(interaction.guild, "✅ Don approuvé", f"Par {user.mention}")
-            await close_ticket(interaction.client, ticket_id, user.id)
-            await interaction.followup.send(embed=success_embed("Don approuvé, ticket fermé."), ephemeral=True)
+            await refresh_treasury_panel(interaction.client, interaction.guild)
+            await log_history(interaction.guild, "✅ Ticket don traité", f"Par {user.mention}")
+        await close_ticket(interaction.client, ticket_id, user.id)
+        if action == "approve":
+            await interaction.followup.send(embed=success_embed("Approuvé, ticket fermé."), ephemeral=True)
         else:
-            await close_ticket(interaction.client, ticket_id, user.id)
-            await interaction.followup.send(embed=warning_embed("Don refusé, ticket fermé."), ephemeral=True)
+            await interaction.followup.send(embed=warning_embed("Refusé, ticket fermé."), ephemeral=True)
 
 
 class Tickets(commands.Cog):
@@ -300,19 +346,28 @@ class Tickets(commands.Cog):
     @app_commands.command(name="setup_declaration", description="Poste le panneau de déclaration dans #declaration.")
     @app_commands.guild_only()
     async def setup_declaration(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not (settings.test_mode or is_officer(interaction.user)):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
             return
-        channel = find_channel(interaction.guild, "declaration")
+        channel = find_channel(interaction.guild, "declaration")  # type: ignore[arg-type]
         if channel is None:
-            await interaction.response.send_message(embed=error_embed("Salon #declaration introuvable"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Salon #declaration introuvable"), ephemeral=True)
             return
-        embed = info_embed(
-            "✉️ Déclarations",
-            "Choisis un bouton pour ouvrir un ticket privé avec le staff.",
+        embed = discord.Embed(
+            description=(
+                "## ✉️  DÉCLARATIONS\n\n"
+                "**💰 Don** — silver ou items pour le coffre\n"
+                "**🎯 Ordre prio** — contribution à un ordre existant\n"
+                "**🔨 Craft / stuff** — demander ressources ou équipement\n"
+                "**⚠️ Problème** — signaler un souci (staff uniquement)\n"
+                "**💬 Autre** — tout le reste\n\n"
+                "Un salon privé s'ouvre. Le Grand Trésorier est prévenu pour don / ordre / craft."
+            ),
+            color=discord.Color.orange(),
         )
         await channel.send(embed=embed, view=DeclarationView())
-        await interaction.response.send_message(embed=success_embed("Panneau posté", channel.mention), ephemeral=True)
+        await interaction.followup.send(embed=success_embed("Panneau posté", channel.mention), ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:

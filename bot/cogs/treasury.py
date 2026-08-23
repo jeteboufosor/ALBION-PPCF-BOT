@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -15,12 +14,12 @@ from sqlalchemy.orm import selectinload
 from bot.config import settings
 from bot.database.crud import get_or_create_member, get_treasury_state
 from bot.database.engine import session_scope
-from bot.database.models import Debt, ResourceRequest, TreasuryTransaction, utcnow
+from bot.database.models import ContributionScore, Debt, GuildDonation, ResourceRequest, TreasuryTransaction, utcnow
 from bot.utils.embeds import discord_timestamp, error_embed, format_silver, info_embed, success_embed, warning_embed
+from bot.utils.helpers import parse_discord_time
 from bot.utils.permissions import can_manage_treasury, find_channel
 
 LOGGER = logging.getLogger(__name__)
-TZ = ZoneInfo("Europe/Berlin")
 
 
 def _can_tresorerie(member: discord.Member) -> bool:
@@ -28,12 +27,14 @@ def _can_tresorerie(member: discord.Member) -> bool:
 
 
 def _parse_date(raw: str) -> datetime:
-    from bot.utils.helpers import parse_discord_time
-
     return parse_discord_time(raw)
 
 
-async def build_treasury_embed():
+def _item_key(name: str) -> str:
+    return "".join(ch.lower() for ch in name if ch.isalnum())
+
+
+async def build_treasury_embed() -> discord.Embed:
     async with session_scope() as session:
         state = await get_treasury_state(session)
         debts = list(
@@ -50,24 +51,42 @@ async def build_treasury_embed():
         deposited = state.total_deposited
         withdrawn = state.total_withdrawn
 
+    rule = "━" * 26
+    debt_block = []
+    for debt in debts[:12]:
+        name = debt.member.discord_name if debt.member else "?"
+        debt_block.append(
+            f"**{name}**\n"
+            f"{format_silver(debt.remaining_amount)}  ·  id `{debt.id}`  ·  {discord_timestamp(debt.deadline_at, 'R')}"
+        )
+    res_block = []
+    for req in resources[:12]:
+        original = req.original_quantity or req.quantity
+        res_block.append(
+            f"**{req.item_name}**\n"
+            f"reste **{req.quantity}** / {original}  ·  id `{req.id}`"
+        )
+
     embed = discord.Embed(
-        title="💰  TRÉSORERIE DE GUILDE",
         description=(
+            f"-# COFFRE DE GUILDE\n"
+            f"{rule}\n\n"
+            f"## 💰  TRÉSORERIE\n\n"
             f"# {format_silver(balance)}\n"
-            f"-# Solde actuel\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━"
+            f"-# solde actuel\n\n"
+            f"{rule}\n\n"
+            f"## MOUVEMENTS\n"
+            f"**Donné**   {format_silver(deposited)}\n"
+            f"**Retiré**  {format_silver(withdrawn)}\n\n"
+            f"{rule}\n\n"
+            f"## DETTES\n"
+            f"{chr(10).join(debt_block) if debt_block else '*Aucune dette ouverte.*'}\n\n"
+            f"{rule}\n\n"
+            f"## DEMANDES DE RESSOURCES\n"
+            f"{chr(10).join(res_block) if res_block else '*Aucune demande en cours.*'}"
         ),
         color=discord.Color.gold(),
     )
-    embed.add_field(name="📥 Total donné", value=format_silver(deposited), inline=True)
-    embed.add_field(name="📤 Total retiré", value=format_silver(withdrawn), inline=True)
-    debt_lines = []
-    for debt in debts[:10]:
-        name = debt.member.discord_name if debt.member else "?"
-        debt_lines.append(f"• {name} — {format_silver(debt.remaining_amount)} (id `{debt.id}` · {discord_timestamp(debt.deadline_at, 'R')})")
-    embed.add_field(name="📋 Dettes en cours", value="\n".join(debt_lines) or "*Aucune*", inline=False)
-    res_lines = [f"• {r.quantity}× {r.item_name} (id `{r.id}`)" for r in resources[:10]]
-    embed.add_field(name="📥 Demandes de ressources", value="\n".join(res_lines) or "*Aucune*", inline=False)
     embed.set_footer(text="Albion PPCF • Fort Sterling")
     return embed
 
@@ -100,6 +119,37 @@ async def log_history(guild: discord.Guild, title: str, description: str) -> Non
     await channel.send(embed=info_embed(title, description))
 
 
+async def _credit_silver(session, *, donor: discord.Member, amount: int, note: str, author_id: int) -> None:
+    state = await get_treasury_state(session)
+    state.current_balance += amount
+    state.total_deposited += amount
+    db_member = await get_or_create_member(session, discord_id=donor.id, discord_name=donor.display_name)
+    score = await session.scalar(select(ContributionScore).where(ContributionScore.member_id == db_member.id))
+    if score is None:
+        score = ContributionScore(member_id=db_member.id, monthly_period=utcnow().strftime("%Y-%m"))
+        session.add(score)
+    score.total_silver_donated += amount
+    session.add(
+        GuildDonation(
+            member_id=db_member.id,
+            donation_type="silver",
+            amount=amount,
+            note=note,
+            approved_by_discord_id=author_id,
+            approved_at=utcnow(),
+        )
+    )
+    session.add(
+        TreasuryTransaction(
+            transaction_type="deposit",
+            amount=amount,
+            balance_after=state.current_balance,
+            note=f"{note} | donateur={donor.display_name}",
+            author_discord_id=author_id,
+        )
+    )
+
+
 class Treasury(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -111,52 +161,120 @@ class Treasury(commands.Cog):
             await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        await refresh_treasury_panel(self.bot, interaction.guild)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await interaction.followup.send(embed=success_embed("Panneau trésorerie à jour"), ephemeral=True)
 
-    @app_commands.command(name="tresorerie_depot", description="Dépose du silver en trésorerie.")
+    @app_commands.command(name="tresorerie_depot", description="Dépose du silver (crédite le donateur au classement).")
     @app_commands.guild_only()
-    async def tresorerie_depot(self, interaction: discord.Interaction, montant: int, note: str) -> None:
+    @app_commands.describe(montant="Silver déposé", note="Motif", donateur="Qui a donné (toi par défaut)")
+    async def tresorerie_depot(
+        self,
+        interaction: discord.Interaction,
+        montant: int,
+        note: str,
+        donateur: discord.Member | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Grand Trésorier uniquement (ou mode test).", ephemeral=True)
+            await interaction.followup.send("Grand Trésorier uniquement (ou mode test).", ephemeral=True)
             return
         if montant <= 0:
-            await interaction.response.send_message(embed=error_embed("Montant invalide"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Montant invalide"), ephemeral=True)
             return
+        donor = donateur or interaction.user
         async with session_scope() as session:
-            state = await get_treasury_state(session)
-            state.current_balance += montant
-            state.total_deposited += montant
+            await _credit_silver(session, donor=donor, amount=montant, note=note, author_id=interaction.user.id)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        await log_history(
+            interaction.guild,  # type: ignore[arg-type]
+            "📥 Dépôt silver",
+            f"Donateur : {donor.mention}\nEnregistré par : {interaction.user.mention}\n+{format_silver(montant)}\n{note}",
+        )
+        await interaction.followup.send(
+            embed=success_embed("Dépôt enregistré", f"{format_silver(montant)} de {donor.mention}"),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="tresorerie_depot_item", description="Dépose des items : diminue la demande de ressource correspondante.")
+    @app_commands.guild_only()
+    @app_commands.describe(item="Nom de l'item (ex: bois)", quantite="Quantité apportée", donateur="Qui a donné")
+    async def tresorerie_depot_item(
+        self,
+        interaction: discord.Interaction,
+        item: str,
+        quantite: int,
+        donateur: discord.Member | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
+            return
+        if quantite <= 0:
+            await interaction.followup.send(embed=error_embed("Quantité invalide"), ephemeral=True)
+            return
+        donor = donateur or interaction.user
+        needle = _item_key(item)
+        async with session_scope() as session:
+            reqs = list((await session.execute(select(ResourceRequest).where(ResourceRequest.status == "open"))).scalars().all())
+            match = next((r for r in reqs if needle and needle in _item_key(r.item_name)), None)
+            if match is None:
+                match = next((r for r in reqs if _item_key(r.item_name) in needle), None)
+            if match is None:
+                await interaction.followup.send(
+                    embed=error_embed("Aucune demande ouverte", f"Pas de demande pour **{item}**."),
+                    ephemeral=True,
+                )
+                return
+            before = match.quantity
+            match.quantity = max(0, match.quantity - quantite)
+            after = match.quantity
+            if match.original_quantity is None:
+                match.original_quantity = before
+            if match.quantity == 0:
+                match.status = "closed"
+                match.fulfilled_at = utcnow()
+            db_member = await get_or_create_member(session, discord_id=donor.id, discord_name=donor.display_name)
             session.add(
-                TreasuryTransaction(
-                    transaction_type="deposit",
-                    amount=montant,
-                    balance_after=state.current_balance,
-                    note=note,
-                    author_discord_id=interaction.user.id,
+                GuildDonation(
+                    member_id=db_member.id,
+                    donation_type="item",
+                    amount=quantite,
+                    item_name=match.item_name,
+                    note=f"Dépôt item → demande #{match.id}",
+                    approved_by_discord_id=interaction.user.id,
+                    approved_at=utcnow(),
                 )
             )
-        await refresh_treasury_panel(self.bot, interaction.guild)
+            item_label = match.item_name
+            req_id = match.id
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
-            interaction.guild,
-            "📥 Dépôt",
-            f"{interaction.user.mention} +{format_silver(montant)}\n{note}",
+            interaction.guild,  # type: ignore[arg-type]
+            "📦 Dépôt item",
+            f"{donor.mention} apporte **{quantite}× {item_label}**\nDemande `{req_id}` : {before} → **{after}**",
         )
-        await interaction.response.send_message(embed=success_embed("Dépôt enregistré", format_silver(montant)), ephemeral=True)
+        await interaction.followup.send(
+            embed=success_embed("Item déposé", f"{item_label} : {before} → **{after}** restants"),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="tresorerie_retrait", description="Retire du silver de la trésorerie.")
     @app_commands.guild_only()
     async def tresorerie_retrait(self, interaction: discord.Interaction, montant: int, note: str) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Grand Trésorier uniquement (ou mode test).", ephemeral=True)
+            await interaction.followup.send("Grand Trésorier uniquement (ou mode test).", ephemeral=True)
             return
         if montant <= 0:
-            await interaction.response.send_message(embed=error_embed("Montant invalide"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Montant invalide"), ephemeral=True)
             return
         async with session_scope() as session:
             state = await get_treasury_state(session)
             if state.current_balance < montant:
-                await interaction.response.send_message(embed=error_embed("Solde insuffisant", format_silver(state.current_balance)), ephemeral=True)
+                await interaction.followup.send(
+                    embed=error_embed("Solde insuffisant", format_silver(state.current_balance)),
+                    ephemeral=True,
+                )
                 return
             state.current_balance -= montant
             state.total_withdrawn += montant
@@ -169,12 +287,13 @@ class Treasury(commands.Cog):
                     author_discord_id=interaction.user.id,
                 )
             )
-        await refresh_treasury_panel(self.bot, interaction.guild)
-        await log_history(interaction.guild, "📤 Retrait", f"{interaction.user.mention} -{format_silver(montant)}\n{note}")
-        await interaction.response.send_message(embed=success_embed("Retrait enregistré", format_silver(montant)), ephemeral=True)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        await log_history(interaction.guild, "📤 Retrait", f"{interaction.user.mention} -{format_silver(montant)}\n{note}")  # type: ignore[arg-type]
+        await interaction.followup.send(embed=success_embed("Retrait enregistré", format_silver(montant)), ephemeral=True)
 
     @app_commands.command(name="dette_ajouter", description="Ajoute une dette à un membre.")
     @app_commands.guild_only()
+    @app_commands.describe(deadline="<t:1787511600:R>")
     async def dette_ajouter(
         self,
         interaction: discord.Interaction,
@@ -183,13 +302,14 @@ class Treasury(commands.Cog):
         deadline: str,
         raison: str,
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
             return
         try:
             ends = _parse_date(deadline)
         except ValueError as exc:
-            await interaction.response.send_message(embed=error_embed("Deadline", str(exc)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Deadline", str(exc)), ephemeral=True)
             return
         async with session_scope() as session:
             db_member = await get_or_create_member(session, discord_id=membre.id, discord_name=membre.display_name)
@@ -204,31 +324,32 @@ class Treasury(commands.Cog):
             session.add(debt)
             await session.flush()
             debt_id = debt.id
-        await refresh_treasury_panel(self.bot, interaction.guild)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
-            interaction.guild,
+            interaction.guild,  # type: ignore[arg-type]
             "📋 Dette ajoutée",
-            f"{membre.mention} — {format_silver(montant)}\nÉchéance {discord_timestamp(ends, 'F')}\n{raison}\nid `{debt_id}`",
+            f"{membre.mention} — {format_silver(montant)}\nÉchéance {discord_timestamp(ends, 'R')}\n{raison}\nid `{debt_id}`",
         )
-        await interaction.response.send_message(embed=success_embed("Dette créée", f"id `{debt_id}`"), ephemeral=True)
+        await interaction.followup.send(embed=success_embed("Dette créée", f"id `{debt_id}`"), ephemeral=True)
 
     @app_commands.command(name="dette_rembourser", description="Marque une dette comme remboursée.")
     @app_commands.guild_only()
     async def dette_rembourser(self, interaction: discord.Interaction, id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
             return
         async with session_scope() as session:
             debt = await session.get(Debt, id)
             if debt is None or debt.status != "open":
-                await interaction.response.send_message(embed=error_embed("Dette introuvable"), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("Dette introuvable"), ephemeral=True)
                 return
             debt.status = "repaid"
             debt.remaining_amount = 0
             debt.repaid_at = utcnow()
-        await refresh_treasury_panel(self.bot, interaction.guild)
-        await log_history(interaction.guild, "✅ Dette remboursée", f"id `{id}` par {interaction.user.mention}")
-        await interaction.response.send_message(embed=success_embed("Dette soldée"), ephemeral=True)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        await log_history(interaction.guild, "✅ Dette remboursée", f"id `{id}` par {interaction.user.mention}")  # type: ignore[arg-type]
+        await interaction.followup.send(embed=success_embed("Dette soldée"), ephemeral=True)
 
     @app_commands.command(name="ressource_ajouter", description="Ajoute une demande de ressource visible en trésorerie.")
     @app_commands.guild_only()
@@ -239,39 +360,42 @@ class Treasury(commands.Cog):
         quantite: int,
         demandeur: discord.Member,
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
             return
         async with session_scope() as session:
             db_member = await get_or_create_member(session, discord_id=demandeur.id, discord_name=demandeur.display_name)
             req = ResourceRequest(
                 item_name=item,
                 quantity=quantite,
+                original_quantity=quantite,
                 requester_member_id=db_member.id,
                 created_by_discord_id=interaction.user.id,
             )
             session.add(req)
             await session.flush()
             rid = req.id
-        await refresh_treasury_panel(self.bot, interaction.guild)
-        await log_history(interaction.guild, "📦 Demande ressource", f"{quantite}× {item} pour {demandeur.mention} (id `{rid}`)")
-        await interaction.response.send_message(embed=success_embed("Demande ajoutée", f"id `{rid}`"), ephemeral=True)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        await log_history(interaction.guild, "📦 Demande ressource", f"{quantite}× {item} pour {demandeur.mention} (id `{rid}`)")  # type: ignore[arg-type]
+        await interaction.followup.send(embed=success_embed("Demande ajoutée", f"id `{rid}`"), ephemeral=True)
 
     @app_commands.command(name="ressource_supprimer", description="Retire une demande de ressource.")
     @app_commands.guild_only()
     async def ressource_supprimer(self, interaction: discord.Interaction, id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
             return
         async with session_scope() as session:
             req = await session.get(ResourceRequest, id)
             if req is None:
-                await interaction.response.send_message(embed=error_embed("Introuvable"), ephemeral=True)
+                await interaction.followup.send(embed=error_embed("Introuvable"), ephemeral=True)
                 return
             req.status = "closed"
             req.fulfilled_at = utcnow()
-        await refresh_treasury_panel(self.bot, interaction.guild)
-        await interaction.response.send_message(embed=warning_embed("Demande retirée"), ephemeral=True)
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        await interaction.followup.send(embed=warning_embed("Demande retirée"), ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
