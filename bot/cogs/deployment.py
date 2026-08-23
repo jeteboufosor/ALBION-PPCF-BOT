@@ -48,6 +48,8 @@ class ClassPickButton(discord.ui.Button["ClassPickView"]):
         self.response = response
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         await save_response(interaction, self.deployment_id, self.response, self.key)
 
 
@@ -182,33 +184,53 @@ async def process_deployment_timers(bot: commands.Bot) -> None:
     now = utcnow()
     async with session_scope() as session:
         deps = list((await session.execute(select(Deployment).where(Deployment.status == "scheduled"))).scalars().all())
+    LOGGER.info("Timer déploiements: %s prévu(s)", len(deps))
     for dep in deps:
-        starts = dep.starts_at if dep.starts_at.tzinfo else dep.starts_at.replace(tzinfo=UTC)
-        if dep.reminder_sent_at is None and now >= starts - timedelta(minutes=10) and now < starts:
+        starts = dep.starts_at
+        if starts.tzinfo is None:
+            starts = starts.replace(tzinfo=UTC)
+        else:
+            starts = starts.astimezone(UTC)
+        minutes_left = (starts - now).total_seconds() / 60
+        LOGGER.info("Déploiement %s dans %.1f min (rappel envoyé=%s)", dep.id, minutes_left, bool(dep.reminder_sent_at))
+        should_remind = dep.reminder_sent_at is None and minutes_left <= 10
+        if should_remind:
+            ids: list[int] = []
             async with session_scope() as session:
-                loaded = await _load_deploy(session, dep.id)
+                loaded = await session.get(Deployment, dep.id)
                 if loaded is None:
                     continue
                 loaded.reminder_sent_at = now
-                people = [r for r in loaded.responses if r.response in {"yes", "maybe"} and r.member]
-            for resp in people:
-                uid = resp.member.discord_id
+                rows = await session.execute(
+                    select(Member.discord_id)
+                    .join(DeploymentResponse, DeploymentResponse.member_id == Member.id)
+                    .where(
+                        DeploymentResponse.deployment_id == dep.id,
+                        DeploymentResponse.response.in_(("yes", "maybe")),
+                    )
+                )
+                ids = [int(r[0]) for r in rows.all()]
+            LOGGER.info("Rappel déploiement %s → %s membre(s)", dep.id, len(ids))
+            for uid in ids:
                 user = bot.get_user(uid)
                 if user is None:
                     try:
                         user = await bot.fetch_user(uid)
                     except discord.HTTPException:
+                        LOGGER.warning("fetch_user %s échoué", uid)
                         continue
                 try:
                     await user.send(
-                        f"🐴 Rappel : déploiement **{dep.activity_type}** dans 10 min.\n"
-                        f"Départ {discord_timestamp(starts, 'F')} ({discord_timestamp(starts, 'R')})"
+                        f"🐴 **Rappel déploiement {dep.activity_type}**\n"
+                        f"Départ {discord_timestamp(starts, 'F')} — {discord_timestamp(starts, 'R')}\n"
+                        f"Tu es inscrit (participe / peut-être)."
                     )
+                    LOGGER.info("DM rappel OK → %s", uid)
                 except discord.HTTPException:
-                    LOGGER.info("DM rappel déploiement impossible pour %s", uid)
-        if now >= starts:
+                    LOGGER.warning("DM rappel refusé par %s (MP fermés ?)", uid)
+        if minutes_left <= 0:
             async with session_scope() as session:
-                loaded = await _load_deploy(session, dep.id)
+                loaded = await session.get(Deployment, dep.id)
                 if loaded is None or loaded.status != "scheduled":
                     continue
                 loaded.status = "launched"

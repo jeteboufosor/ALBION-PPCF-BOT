@@ -13,7 +13,7 @@ from sqlalchemy import select
 from bot.database.crud import get_or_create_member
 from bot.database.engine import session_scope
 from bot.database.models import MarketWatch
-from bot.services.item_lookup import item_autocomplete
+from bot.services.item_lookup import item_autocomplete, resolve_item_query
 from bot.services.item_service import ItemService
 from bot.services.market_api import FORT_STERLING, MarketAPIClient, MarketAPIError
 from bot.utils.embeds import error_embed, info_embed, success_embed, warning_embed
@@ -27,13 +27,43 @@ def _fmt_price(value: int | float | None) -> str:
     return f"{int(value):,}".replace(",", " ")
 
 
-def _sparkline(values: list[int]) -> str:
+def _price_chart(values: list[int]) -> str:
+    """Courbe unicode type terminal (8 lignes)."""
+
     if not values:
         return ""
-    blocks = "▁▂▃▄▅▆▇█"
-    lo, hi = min(values), max(values)
+    width = min(18, max(8, len(values)))
+    # ré-échantillonne
+    pts: list[int] = []
+    for i in range(width):
+        idx = int(i * (len(values) - 1) / max(1, width - 1))
+        pts.append(values[idx])
+    lo, hi = min(pts), max(pts)
     span = max(1, hi - lo)
-    return "".join(blocks[min(7, int((v - lo) / span * 7))] for v in values)
+    height = 8
+    grid = [[" " for _ in range(width)] for _ in range(height)]
+    for x, v in enumerate(pts):
+        y = height - 1 - int(round((v - lo) / span * (height - 1)))
+        grid[y][x] = "●"
+        for fill in range(y + 1, height):
+            if grid[fill][x] == " ":
+                grid[fill][x] = "│"
+    # relie les points
+    for x in range(width - 1):
+        y1 = height - 1 - int(round((pts[x] - lo) / span * (height - 1)))
+        y2 = height - 1 - int(round((pts[x + 1] - lo) / span * (height - 1)))
+        step = 1 if y2 >= y1 else -1
+        for y in range(y1, y2, step):
+            if grid[y][x] == " ":
+                grid[y][x] = "╱" if step < 0 else "╲"
+    lines = []
+    for i, row in enumerate(grid):
+        label = _fmt_price(hi if i == 0 else lo if i == height - 1 else None)
+        prefix = f"{label:>7}" if label != "—" else "       "
+        lines.append(f"{prefix} ┤{''.join(row)}")
+    lines.append(f"        └{'─' * width}")
+    lines.append(f"         {-len(values)+1:>3}j{' ' * (width - 8)}0")
+    return "```\n" + "\n".join(lines) + "\n```"
 
 
 class Market(commands.Cog):
@@ -46,6 +76,10 @@ class Market(commands.Cog):
         await self.api.close()
         await self.items.close()
 
+    async def _resolve(self, raw: str) -> str:
+        hits = await resolve_item_query(raw)
+        return hits[0][0] if hits else raw.strip().upper()
+
     async def _icon(self, item_id: str) -> str:
         try:
             return await self.items.get_icon_url(item_id)
@@ -56,6 +90,7 @@ class Market(commands.Cog):
     @app_commands.autocomplete(item=item_autocomplete)
     async def prix(self, interaction: discord.Interaction, item: str) -> None:
         await interaction.response.defer(ephemeral=False)
+        item = await self._resolve(item)
         try:
             rows = await self.api.get_prices(item, locations=FORT_STERLING)
         except MarketAPIError as exc:
@@ -78,6 +113,7 @@ class Market(commands.Cog):
     @app_commands.autocomplete(item=item_autocomplete)
     async def prix_comparer(self, interaction: discord.Interaction, item: str) -> None:
         await interaction.response.defer(ephemeral=False)
+        item = await self._resolve(item)
         try:
             rows = await self.api.compare_cities(item)
         except MarketAPIError as exc:
@@ -97,6 +133,7 @@ class Market(commands.Cog):
     @app_commands.autocomplete(item=item_autocomplete)
     async def black_market(self, interaction: discord.Interaction, item: str) -> None:
         await interaction.response.defer(ephemeral=False)
+        item = await self._resolve(item)
         try:
             rows = await self.api.get_prices(item, locations="Black Market")
         except MarketAPIError as exc:
@@ -141,10 +178,10 @@ class Market(commands.Cog):
         if not prices:
             await interaction.followup.send(embed=warning_embed("Pas d'historique pour cette période"))
             return
-        curve = _sparkline(prices)
+        curve = _price_chart(prices)
         embed = info_embed(
             f"📈 {item} — {jours} jour(s)",
-            f"`{curve}`\nMin **{_fmt_price(min(prices))}**  ·  Max **{_fmt_price(max(prices))}**  ·  Dernier **{_fmt_price(prices[-1])}**",
+            f"{curve}Min **{_fmt_price(min(prices))}**  ·  Max **{_fmt_price(max(prices))}**  ·  Dernier **{_fmt_price(prices[-1])}**",
         )
         await interaction.followup.send(embed=embed)
 
