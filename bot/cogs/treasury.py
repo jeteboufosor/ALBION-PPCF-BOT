@@ -166,13 +166,13 @@ class Treasury(commands.Cog):
 
     @app_commands.command(name="tresorerie_depot", description="Dépose du silver (crédite le donateur au classement).")
     @app_commands.guild_only()
-    @app_commands.describe(montant="Silver déposé", note="Motif", donateur="Qui a donné (toi par défaut)")
+    @app_commands.describe(montant="Silver déposé", note="Motif", donateur="Qui a donné (obligatoire)")
     async def tresorerie_depot(
         self,
         interaction: discord.Interaction,
         montant: int,
         note: str,
-        donateur: discord.Member | None = None,
+        donateur: discord.Member,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
@@ -181,7 +181,7 @@ class Treasury(commands.Cog):
         if montant <= 0:
             await interaction.followup.send(embed=error_embed("Montant invalide"), ephemeral=True)
             return
-        donor = donateur or interaction.user
+        donor = donateur
         async with session_scope() as session:
             await _credit_silver(session, donor=donor, amount=montant, note=note, author_id=interaction.user.id)
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
@@ -314,18 +314,18 @@ class Treasury(commands.Cog):
             await session.flush()
             rid = req.id
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
-        await log_history(interaction.guild, "📦 Demande ressource", f"{quantite}× {item} pour {demandeur.mention} (id `{rid}`)")  # type: ignore[arg-type]
+        await log_history(interaction.guild, "📦 Demande ressource", f"{quantite}× {item} par {demandeur.mention} (id `{rid}`)")  # type: ignore[arg-type]
         await interaction.followup.send(embed=success_embed("Demande ajoutée", f"id `{rid}`"), ephemeral=True)
 
     @app_commands.command(name="ressource_supprimer", description="Débite une quantité sur une demande (id + nombre).")
     @app_commands.guild_only()
-    @app_commands.describe(id="ID de la demande", quantite="Quantité ajoutée / débitée", donateur="Qui a apporté (toi par défaut)")
+    @app_commands.describe(id="ID de la demande", quantite="Quantité ajoutée", donateur="Qui a apporté (obligatoire)")
     async def ressource_supprimer(
         self,
         interaction: discord.Interaction,
         id: int,
         quantite: int,
-        donateur: discord.Member | None = None,
+        donateur: discord.Member,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
@@ -348,7 +348,7 @@ class Treasury(commands.Cog):
                 req.status = "closed"
                 req.fulfilled_at = utcnow()
             item_label = req.item_name
-        donor = donateur or interaction.user
+        donor = donateur
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
             interaction.guild,  # type: ignore[arg-type]

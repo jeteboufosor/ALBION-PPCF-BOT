@@ -23,7 +23,7 @@ ROLE_BUTTONS: tuple[tuple[str, str, discord.ButtonStyle], ...] = (
     ("healer", "💚 Healer", discord.ButtonStyle.secondary),
     ("support", "🌿 Support", discord.ButtonStyle.secondary),
     ("lfg", "👥 Recherche-de-groupe", discord.ButtonStyle.primary),
-    ("deployment", "🐺 Déploiement", discord.ButtonStyle.primary),
+    ("deployment", "🐴 Déploiement", discord.ButtonStyle.primary),
 )
 
 
@@ -98,7 +98,7 @@ def build_roles_embed() -> discord.Embed:
     )
     embed.add_field(
         name="Notifications",
-        value="👥 recherche-de-groupe • 🐺 déploiement",
+        value="👥 recherche-de-groupe • 🐴 déploiement",
         inline=False,
     )
     return embed

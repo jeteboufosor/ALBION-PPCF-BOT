@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import commands
 
 from bot.tasks.deployment_reminder import run_deployment_reminders
+from bot.tasks.killboard_sync import run_killboard_sync
 from bot.tasks.order_cleanup import run_order_cleanup
 from bot.tasks.ticket_cleanup import run_ticket_cleanup
 

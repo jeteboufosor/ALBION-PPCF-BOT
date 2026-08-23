@@ -68,6 +68,7 @@ class DeployActionItem(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.action == "no":
+            await interaction.response.defer(ephemeral=True)
             await save_response(interaction, self.deployment_id, "no", None)
             return
         await interaction.response.send_message("Choisis ton rôle :", view=ClassPickView(self.deployment_id, self.action), ephemeral=True)
@@ -99,7 +100,7 @@ def build_deploy_embed(dep: Deployment) -> discord.Embed:
     embed = discord.Embed(
         description=(
             f"-# DÉPLOIEMENT\n"
-            f"## 🐺  {dep.activity_type.upper()}\n\n"
+            f"## 🐴  {dep.activity_type.upper()}\n\n"
             f"{dep.description}\n\n"
             f"**Stuff :** {dep.required_stuff or '—'}\n"
             f"**Départ :** {discord_timestamp(starts, 'F')} — {discord_timestamp(starts, 'R')}\n"
@@ -169,23 +170,12 @@ async def save_response(interaction: discord.Interaction, deployment_id: int, re
     async with session_scope() as session:
         dep = await _load_deploy(session, deployment_id)
         assert dep is not None
-        embed = build_deploy_embed(dep)
-        view = DeployButtons(dep.id)
-    if interaction.message and interaction.message.author == interaction.client.user and interaction.message.embeds:
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.edit_message(embed=embed, view=view)
-            else:
-                await interaction.message.edit(embed=embed, view=view)
-                await interaction.followup.send("Réponse enregistrée.", ephemeral=True)
-            return
-        except discord.HTTPException:
-            pass
-    await refresh_deploy(interaction.client, dep)
+        await refresh_deploy(interaction.client, dep)
+    text = "Réponse enregistrée."
     if not interaction.response.is_done():
-        await interaction.response.send_message("Réponse enregistrée.", ephemeral=True)
+        await interaction.response.send_message(text, ephemeral=True)
     else:
-        await interaction.followup.send("Réponse enregistrée.", ephemeral=True)
+        await interaction.followup.send(text, ephemeral=True)
 
 
 async def process_deployment_timers(bot: commands.Bot) -> None:
@@ -206,7 +196,7 @@ async def process_deployment_timers(bot: commands.Bot) -> None:
                 if user is None:
                     continue
                 try:
-                    await user.send(f"🐺 Déploiement **{dep.activity_type}** dans 10 min — {discord_timestamp(starts, 'R')}")
+                    await user.send(f"🐴 Déploiement **{dep.activity_type}** dans 10 min — {discord_timestamp(starts, 'R')}")
                 except discord.HTTPException:
                     pass
         if now >= starts:

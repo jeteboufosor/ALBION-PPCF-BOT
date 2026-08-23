@@ -84,7 +84,7 @@ ROLE_NAMES: Final[dict[str, str]] = {
     "healer": "💚 Healer",
     "support": "🌿 Support",
     "lfg": "👥 recherche-de-groupe",
-    "deployment": "🐺 déploiement",
+    "deployment": "🐴 déploiement",
 }
 
 CLASS_ROLE_KEYS: Final[tuple[str, ...]] = ("tank", "dps", "healer", "support", "lfg", "deployment")
@@ -115,7 +115,7 @@ CHANNEL_NAMES: Final[dict[str, str]] = {
     "lfg": "👥 recherche-de-groupe",
     "arrival_departure": "🏰 arrivé-départ",
     "bot_commands": "🤖 commandes-bot",
-    "deployment": "🐺 déploiement",
+    "deployment": "🐴 déploiement",
     "promotion": "🏅 promotion",
     "battlefield": "💀 champ-de-bataille",
     "market_commands": "🛒 commandes-marché",
