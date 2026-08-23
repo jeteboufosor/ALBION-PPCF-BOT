@@ -27,7 +27,7 @@ async def run_order_cleanup(bot: commands.Bot) -> tuple[int, int]:
         result = await session.execute(
             select(Order)
             .options(selectinload(Order.participants).selectinload(OrderParticipant.member))
-            .where(Order.status.in_(("completed", "cancelled")), Order.archived_at.is_(None))
+            .where(Order.status.in_(("completed", "cancelled", "expired")), Order.archived_at.is_(None))
         )
         orders = list(result.scalars().all())
 
@@ -95,7 +95,8 @@ async def _archive_order(bot: commands.Bot, order: Order) -> None:
                 f"📜 Archive {format_order_number(order.order_number)} — {order.title}",
                 order.description,
             )
-            embed.add_field(name="Statut", value=order.status, inline=True)
+            status_fr = {"completed": "réussi", "expired": "échoué", "cancelled": "annulé"}.get(order.status, order.status)
+            embed.add_field(name="Statut", value=status_fr, inline=True)
             embed.add_field(name="Total", value=f"{order.current_amount}/{order.target_amount}", inline=True)
             embed.add_field(name="Classement", value="\n".join(lines) or "aucun", inline=False)
             await archive.send(embed=embed)

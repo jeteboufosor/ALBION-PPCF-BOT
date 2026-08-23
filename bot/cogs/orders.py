@@ -104,9 +104,9 @@ def build_order_embed(order: Order) -> discord.Embed:
 
     status_label = {
         "active": "🟢 Actif",
-        "completed": "✔️ Terminé",
+        "completed": "✅ Réussi",
         "cancelled": "❌ Annulé",
-        "expired": "⏰ Expiré",
+        "expired": "💀 Échoué",
     }.get(order.status, order.status)
 
     bar = progress_bar(order.current_amount, order.target_amount, width=28)
@@ -119,9 +119,13 @@ def build_order_embed(order: Order) -> discord.Embed:
         close_line = f"\n❌ Annulé par {_mention(order.cancelled_by_discord_id)}"
         if order.cancelled_at:
             close_line += f" — {discord_timestamp(order.cancelled_at, 'R')}"
-    elif order.status in {"completed", "expired"}:
-        who = "la deadline" if order.close_reason == "deadline" else _mention(order.completed_by_discord_id)
-        close_line = f"\n✔️ Clôturé par {who}"
+    elif order.status == "completed":
+        who = "quota atteint" if order.close_reason == "quota" else _mention(order.completed_by_discord_id)
+        close_line = f"\n✅ Ordre réussi — {who}"
+        if order.completed_at:
+            close_line += f" — {discord_timestamp(order.completed_at, 'R')}"
+    elif order.status == "expired":
+        close_line = "\n💀 Ordre échoué — délai dépassé, aucun point"
         if order.completed_at:
             close_line += f" — {discord_timestamp(order.completed_at, 'R')}"
 
@@ -249,8 +253,17 @@ class ProgressModal(discord.ui.Modal, title="Ajouter une progression"):
             total = order.current_amount or 1
             for part in order.participants:
                 part.contribution_percent = part.contribution_amount * 100 / total
+            reached = order.current_amount >= order.target_amount
+            oid = order.id
             await session.flush()
             await refresh_order_message(interaction.client, order)
+        if reached:
+            await complete_order(interaction.client, oid, actor_id=interaction.user.id, reason="quota")
+            await interaction.response.send_message(
+                embed=success_embed("Ordre réussi", f"+{qty} — quota atteint, clôture automatique."),
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message(embed=success_embed("Progression ajoutée", f"+{qty}"), ephemeral=True)
 
 
@@ -289,24 +302,31 @@ async def complete_order(
         order = await _load_order(session, order_id)
         if order is None or order.status != "active":
             return None
-        order.status = "expired" if reason == "deadline" else "completed"
+        quota_ok = order.current_amount >= order.target_amount
+        success = bool(quota_ok)
+        order.status = "completed" if success else "expired"
         order.completed_at = utcnow()
         order.completed_by_discord_id = actor_id
-        order.close_reason = reason
+        if success:
+            order.close_reason = "quota" if reason != "manual" else "manual"
+        else:
+            order.close_reason = reason if reason == "deadline" else "failed"
         _, points, _ = PRIORITY_META.get(order.priority, ("", 0, None))
         contributors = [p for p in order.participants if p.contribution_amount > 0]
         contributors.sort(key=lambda p: p.contribution_amount, reverse=True)
-        for part in contributors:
-            part.points_awarded = points
-            score = await session.scalar(select(ContributionScore).where(ContributionScore.member_id == part.member_id))
-            if score is None:
-                score = ContributionScore(member_id=part.member_id, monthly_period=utcnow().strftime("%Y-%m"))
-                session.add(score)
-            score.order_points_all_time += points
-            score.order_points_monthly += points
+        if success:
+            for part in contributors:
+                part.points_awarded = points
+                score = await session.scalar(select(ContributionScore).where(ContributionScore.member_id == part.member_id))
+                if score is None:
+                    score = ContributionScore(member_id=part.member_id, monthly_period=utcnow().strftime("%Y-%m"))
+                    session.add(score)
+                score.order_points_all_time += points
+                score.order_points_monthly += points
         await session.flush()
         ranking = list(contributors)
         snapshot = {
+            "success": success,
             "title": order.title,
             "number": order.order_number,
             "reward_type": order.reward_type,
@@ -415,10 +435,11 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
         await interaction.response.defer(ephemeral=True)
         done = await complete_order(bot, order_id, actor_id=user.id, reason="manual")
         if done is None:
-            await interaction.followup.send(embed=error_embed("Impossible de terminer"), ephemeral=True)
+            await interaction.followup.send(embed=error_embed("Impossible de clôturer"), ephemeral=True)
         else:
+            label = "Ordre réussi" if done.status == "completed" else "Ordre échoué"
             await interaction.followup.send(
-                embed=success_embed("Ordre terminé", "Reste 24h ici puis archive dans #ordres-passés."),
+                embed=success_embed(label, "Reste 24h ici puis archive dans #ordres-passés."),
                 ephemeral=True,
             )
 

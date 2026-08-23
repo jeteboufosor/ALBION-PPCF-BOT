@@ -41,7 +41,7 @@ COLUMNS = {
 }
 
 
-async def _top(session, column: str, limit: int = 15) -> list[tuple[Member, ContributionScore]]:
+async def _top(session, column: str, limit: int = 10) -> list[tuple[Member, ContributionScore]]:
     col = getattr(ContributionScore, column)
     result = await session.execute(
         select(Member, ContributionScore)
@@ -79,13 +79,13 @@ async def build_leaderboard_embed(cat: str = "ordres", period: str = "month") ->
         description=(
             f"-# CLASSEMENT  ·  {per['label'].upper()}\n"
             f"{rule}\n\n"
-            f"## {meta['emoji']}  TOP {meta['title']}\n"
+            f"## {meta['emoji']}  TOP 10 {meta['title']}\n"
             f"-# {per['hint']}\n\n"
             f"{_lines(rows, column, silver=cat == 'dons')}"
         ),
         color=discord.Color.gold() if cat == "dons" else discord.Color.dark_gold(),
     )
-    embed.set_footer(text="Albion PPCF • Fort Sterling  ·  ◄ ► période  ·  boutons = catégorie")
+    embed.set_footer(text="Albion PPCF • Fort Sterling  ·  ⏳ période")
     return embed
 
 
@@ -95,7 +95,7 @@ def other_period(period: str) -> str:
 
 class LeaderboardNavItem(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"lb:(?P<kind>cat|per):(?P<cat>ordres|fame|dons):(?P<per>month|all):(?P<val>ordres|fame|dons|left|right)",
+    template=r"lb:(?P<kind>cat|per):(?P<cat>ordres|fame|dons):(?P<per>month|all):(?P<val>ordres|fame|dons|toggle)",
 ):
     def __init__(self, kind: str, cat: str, period: str, value: str) -> None:
         if kind == "cat":
@@ -110,14 +110,12 @@ class LeaderboardNavItem(
                 )
             )
         else:
-            target_label = PERIOD_META[other_period(period)]["label"]
-            emoji = "◀️" if value == "left" else "▶️"
             super().__init__(
                 discord.ui.Button(
-                    label=target_label,
-                    emoji=emoji,
+                    label=PERIOD_META[period]["label"],
+                    emoji="⏳",
                     style=discord.ButtonStyle.success,
-                    custom_id=f"lb:per:{cat}:{period}:{value}",
+                    custom_id=f"lb:per:{cat}:{period}:toggle",
                 )
             )
         self.kind = kind
