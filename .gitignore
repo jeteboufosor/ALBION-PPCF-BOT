@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Albion Guild Bot
+/data/
+/backups/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+.env.*
+!.env.example
