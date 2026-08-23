@@ -90,7 +90,7 @@ Les modèles de la Phase 1 couvrent toutes les tables prévues : membres, ordres
 Les fichiers nécessaires sont déjà présents :
 
 - `Procfile` : `worker: python -m bot.main`
-- `runtime.txt` : `python-3.11.9`
+- `runtime.txt` : `3.11`
 - `requirements.txt`
 
 Variables Railway à prévoir :
