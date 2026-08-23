@@ -384,12 +384,17 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
                 await interaction.followup.send("Tu es déjà inscrit.", ephemeral=True)
                 return
             session.add(OrderParticipant(order_id=order.id, member_id=member.id))
-            await session.flush()
+
+        async with session_scope() as session:
             order = await _load_order(session, order_id)
             assert order is not None
             embed = build_order_embed(order)
             view = OrderButtons(order.id)
-        await interaction.edit_original_response(embed=embed, view=view)
+
+        if interaction.message is not None:
+            await interaction.message.edit(embed=embed, view=view)
+        else:
+            await interaction.edit_original_response(embed=embed, view=view)
         await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
         return
 
