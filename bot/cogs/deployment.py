@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from bot.config import settings
 from bot.database.crud import get_or_create_member
 from bot.database.engine import session_scope
-from bot.database.models import Deployment, DeploymentResponse, utcnow
+from bot.database.models import Deployment, DeploymentResponse, Member, utcnow
 from bot.utils.embeds import discord_timestamp, error_embed, success_embed, warning_embed
 from bot.utils.helpers import parse_discord_time
 from bot.utils.permissions import find_channel, find_role, is_officer
@@ -101,7 +101,7 @@ def build_deploy_embed(dep: Deployment) -> discord.Embed:
     status = {"scheduled": "Prévu", "launched": "Lancé", "ended": "Terminé"}.get(dep.status, dep.status)
     embed = discord.Embed(
         description=(
-            f"-# DÉPLOIEMENT\n"
+            f"-# DÉPLOIEMENT  ·  id `{dep.id}`\n"
             f"## 🐴  {dep.activity_type.upper()}\n\n"
             f"{dep.description}\n\n"
             f"**Stuff :** {dep.required_stuff or '—'}\n"
@@ -173,6 +173,11 @@ async def save_response(interaction: discord.Interaction, deployment_id: int, re
         dep = await _load_deploy(session, deployment_id)
         assert dep is not None
         await refresh_deploy(interaction.client, dep)
+        starts = dep.starts_at if dep.starts_at.tzinfo else dep.starts_at.replace(tzinfo=UTC)
+        minutes_left = (starts.astimezone(UTC) - utcnow()).total_seconds() / 60
+        dep_copy = dep
+    if response in {"yes", "maybe"} and minutes_left <= 10:
+        await remind_subscribers(interaction.client, dep_copy)
     text = "Réponse enregistrée."
     if not interaction.response.is_done():
         await interaction.response.send_message(text, ephemeral=True)
@@ -180,54 +185,62 @@ async def save_response(interaction: discord.Interaction, deployment_id: int, re
         await interaction.followup.send(text, ephemeral=True)
 
 
+async def remind_subscribers(bot: commands.Bot, dep: Deployment) -> int:
+    starts = dep.starts_at if dep.starts_at.tzinfo else dep.starts_at.replace(tzinfo=UTC)
+    starts = starts.astimezone(UTC)
+    to_dm: list[int] = []
+    async with session_scope() as session:
+        rows = await session.execute(
+            select(DeploymentResponse.id, Member.discord_id)
+            .join(Member, Member.id == DeploymentResponse.member_id)
+            .where(
+                DeploymentResponse.deployment_id == dep.id,
+                DeploymentResponse.response.in_(("yes", "maybe")),
+                DeploymentResponse.reminded_at.is_(None),
+            )
+        )
+        pending = list(rows.all())
+        for resp_id, _uid in pending:
+            resp = await session.get(DeploymentResponse, resp_id)
+            if resp:
+                resp.reminded_at = utcnow()
+        to_dm = [int(uid) for _rid, uid in pending]
+    sent = 0
+    for uid in to_dm:
+        user = bot.get_user(uid)
+        if user is None:
+            try:
+                user = await bot.fetch_user(uid)
+            except discord.HTTPException:
+                continue
+        try:
+            await user.send(
+                f"🐴 **Rappel déploiement #{dep.id} — {dep.activity_type}**\n"
+                f"{dep.description[:180]}\n"
+                f"Départ {discord_timestamp(starts, 'F')} — {discord_timestamp(starts, 'R')}"
+            )
+            sent += 1
+        except discord.HTTPException:
+            LOGGER.warning("DM déploiement refusé pour %s", uid)
+    if to_dm:
+        channel = bot.get_channel(dep.channel_id) if dep.channel_id else None
+        if isinstance(channel, discord.TextChannel):
+            pings = " ".join(f"<@{uid}>" for uid in to_dm)
+            await channel.send(f"🐴 Rappel **10 min** — déploiement `{dep.id}` {dep.activity_type}\n{pings}")
+    LOGGER.info("Rappels déploiement %s: %s DM, %s inscrits", dep.id, sent, len(to_dm))
+    return sent
+
+
 async def process_deployment_timers(bot: commands.Bot) -> None:
     now = utcnow()
     async with session_scope() as session:
         deps = list((await session.execute(select(Deployment).where(Deployment.status == "scheduled"))).scalars().all())
-    LOGGER.info("Timer déploiements: %s prévu(s)", len(deps))
     for dep in deps:
-        starts = dep.starts_at
-        if starts.tzinfo is None:
-            starts = starts.replace(tzinfo=UTC)
-        else:
-            starts = starts.astimezone(UTC)
+        starts = dep.starts_at if dep.starts_at.tzinfo else dep.starts_at.replace(tzinfo=UTC)
+        starts = starts.astimezone(UTC)
         minutes_left = (starts - now).total_seconds() / 60
-        LOGGER.info("Déploiement %s dans %.1f min (rappel envoyé=%s)", dep.id, minutes_left, bool(dep.reminder_sent_at))
-        should_remind = dep.reminder_sent_at is None and minutes_left <= 10
-        if should_remind:
-            ids: list[int] = []
-            async with session_scope() as session:
-                loaded = await session.get(Deployment, dep.id)
-                if loaded is None:
-                    continue
-                loaded.reminder_sent_at = now
-                rows = await session.execute(
-                    select(Member.discord_id)
-                    .join(DeploymentResponse, DeploymentResponse.member_id == Member.id)
-                    .where(
-                        DeploymentResponse.deployment_id == dep.id,
-                        DeploymentResponse.response.in_(("yes", "maybe")),
-                    )
-                )
-                ids = [int(r[0]) for r in rows.all()]
-            LOGGER.info("Rappel déploiement %s → %s membre(s)", dep.id, len(ids))
-            for uid in ids:
-                user = bot.get_user(uid)
-                if user is None:
-                    try:
-                        user = await bot.fetch_user(uid)
-                    except discord.HTTPException:
-                        LOGGER.warning("fetch_user %s échoué", uid)
-                        continue
-                try:
-                    await user.send(
-                        f"🐴 **Rappel déploiement {dep.activity_type}**\n"
-                        f"Départ {discord_timestamp(starts, 'F')} — {discord_timestamp(starts, 'R')}\n"
-                        f"Tu es inscrit (participe / peut-être)."
-                    )
-                    LOGGER.info("DM rappel OK → %s", uid)
-                except discord.HTTPException:
-                    LOGGER.warning("DM rappel refusé par %s (MP fermés ?)", uid)
+        if minutes_left <= 10:
+            await remind_subscribers(bot, dep)
         if minutes_left <= 0:
             async with session_scope() as session:
                 loaded = await session.get(Deployment, dep.id)

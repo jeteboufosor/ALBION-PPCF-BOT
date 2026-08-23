@@ -304,6 +304,7 @@ class DeploymentResponse(Base, TimestampMixin):
     member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
     response: Mapped[str] = mapped_column(String(20), nullable=False)  # yes, maybe, no
     class_role: Mapped[str | None] = mapped_column(String(30))
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     deployment: Mapped[Deployment] = relationship(back_populates="responses")
     member: Mapped[Member] = relationship(back_populates="deployment_responses")
