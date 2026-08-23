@@ -56,16 +56,24 @@ async def _tickets_category(guild: discord.Guild) -> discord.CategoryChannel | N
 
 
 async def notify_treasurers(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View | None = None) -> None:
-    for member in guild.members:
-        if member.bot:
-            continue
-        if can_manage_treasury(member):
-            try:
-                await member.send(embed=embed, view=view)
-                if view is not None:
-                    view.stop()
-            except discord.HTTPException:
-                continue
+    """DM chaque membre qui a le rôle Grand Trésorier."""
+
+    role = find_role(guild, "grand_treasurer")
+    targets: list[discord.Member] = []
+    if role is not None:
+        targets = [m for m in role.members if not m.bot]
+    if not targets:
+        targets = [m for m in guild.members if not m.bot and can_manage_treasury(m) and find_role(guild, "grand_treasurer") in m.roles]
+    for member in targets:
+        try:
+            sent_view = view
+            await member.send(embed=embed, view=sent_view)
+        except discord.HTTPException:
+            LOGGER.info("DM Grand Trésorier impossible pour %s", member)
+    if view is not None:
+        view.stop()
+    if not targets:
+        LOGGER.warning("Aucun Grand Trésorier à DM (rôle introuvable ou vide)")
 
 
 class TicketCloseView(discord.ui.View):
