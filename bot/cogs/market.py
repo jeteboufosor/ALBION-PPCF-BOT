@@ -149,6 +149,7 @@ class Market(commands.Cog):
     @app_commands.autocomplete(item=item_autocomplete)
     async def historique_prix(self, interaction: discord.Interaction, item: str, jours: app_commands.Range[int, 1, 30] = 7) -> None:
         await interaction.response.defer(ephemeral=False)
+        item = await self._resolve(item)
         end = datetime.now(UTC)
         start = end - timedelta(days=int(jours))
         try:
@@ -189,13 +190,25 @@ class Market(commands.Cog):
     @app_commands.autocomplete(item=item_autocomplete)
     async def watchlist_ajouter(self, interaction: discord.Interaction, item: str, prix_bas: int, prix_haut: int) -> None:
         await interaction.response.defer(ephemeral=True)
+        hits = await resolve_item_query(item)
+        item_id = hits[0][0] if hits else item.strip().upper()
+        label = hits[0][1] if hits else item_id
         async with session_scope() as session:
             member = await get_or_create_member(session, discord_id=interaction.user.id, discord_name=interaction.user.display_name)
-            watch = MarketWatch(member_id=member.id, item_id=item, item_name=item, low_threshold=prix_bas, high_threshold=prix_haut)
+            watch = MarketWatch(
+                member_id=member.id,
+                item_id=item_id,
+                item_name=label.split("  (")[0] if "  (" in label else label,
+                low_threshold=prix_bas,
+                high_threshold=prix_haut,
+            )
             session.add(watch)
             await session.flush()
             wid = watch.id
-        await interaction.followup.send(embed=success_embed("Alerte créée", f"id `{wid}` — {item}"), ephemeral=True)
+        await interaction.followup.send(
+            embed=success_embed("Alerte créée", f"id `{wid}` — {label}\n{prix_bas} – {prix_haut}"),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="watchlist", description="Tes alertes (privé).")
     async def watchlist(self, interaction: discord.Interaction) -> None:
@@ -216,6 +229,18 @@ class Market(commands.Cog):
                 return
             watch.is_active = False
         await interaction.followup.send(embed=success_embed("Alerte retirée"), ephemeral=True)
+
+    @app_commands.command(name="test_alertes_prix", description="Force une passe d'alertes + aperçu rapport.")
+    async def test_alertes_prix(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        from bot.tasks.price_watch import run_daily_price_report, run_price_watch
+
+        n = await run_price_watch(self.bot)
+        await run_daily_price_report(self.bot)
+        await interaction.followup.send(
+            f"Passe alertes : **{n}** déclenchée(s). Rapport posté dans #alertes-prix si le salon existe.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="craft_profit", description="Rentabilité craft (lien albion.tools).")
     @app_commands.autocomplete(item=item_autocomplete)

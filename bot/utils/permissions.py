@@ -27,7 +27,8 @@ CHANNEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "market_commands": ("marche", "market", "commandes-marche"),
     "leaderboard": ("leaderboard", "classement", "classem", "palmares", "top10"),
     "sql_backup": ("backup",),
-    "bot_alerts": ("alerte", "alertes-bot"),
+    "bot_alerts": ("alertes-bot", "alerte-bot", "alertesbot"),
+    "price_alerts": ("alertes-prix", "alerte-prix", "alertesprix"),
 }
 
 
