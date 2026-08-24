@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.config import CHANNEL_NAMES, settings
+from bot.config import CHANNEL_NAMES, PLAYSTYLE_ROLE_KEYS, ROLE_NAMES, settings
 from bot.database.crud import get_or_create_member
 from bot.database.engine import session_scope
 from bot.database.models import utcnow
@@ -34,6 +34,24 @@ GAMEPLAY_CHOICES: dict[str, str] = {
 
 RULES_CUSTOM_ID = "onboarding:accept_rules"
 PROFILE_CUSTOM_ID = "onboarding:open_profile"
+
+
+async def apply_playstyle_role(guild: discord.Guild, member: discord.Member, key: str) -> None:
+    """Un seul rôle de style à la fois (comme les boutons radio du serveur)."""
+
+    wanted = find_role(guild, key)
+    to_remove = []
+    for other in PLAYSTYLE_ROLE_KEYS:
+        role = find_role(guild, other)
+        if role and role in member.roles and other != key:
+            to_remove.append(role)
+    try:
+        if to_remove:
+            await member.remove_roles(*to_remove, reason="Style de jeu")
+        if wanted and wanted not in member.roles:
+            await member.add_roles(wanted, reason="Style de jeu")
+    except discord.HTTPException:
+        LOGGER.warning("Impossible d'appliquer le rôle style %s à %s", key, member)
 
 
 def _can_use_test_commands(member: discord.Member) -> bool:
@@ -97,6 +115,10 @@ class GameplaySelect(discord.ui.Select["GameplaySelectView"]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         key = self.values[0]
+        guild = interaction.guild
+        user = interaction.user
+        if guild and isinstance(user, discord.Member):
+            await apply_playstyle_role(guild, user, key)
         await interaction.response.send_modal(AlbionNameModal(key))
 
 
@@ -229,7 +251,7 @@ async def maybe_validate_member(
                     "• `/profil` — voir ton profil\n"
                     "• `/profil_pseudo` — mettre à jour ton pseudo Albion\n"
                     "• `/profil_role` — mettre à jour ton style de jeu\n"
-                    "Ensuite, passe dans #rôles pour choisir Tank / DPS / Healer / Support."
+                    "Ensuite, passe dans #rôles pour tes classes (Tank / DPS / Healer / Support)."
                 ),
             )
         )
@@ -239,60 +261,104 @@ async def maybe_validate_member(
 
 
 def build_rules_embed() -> discord.Embed:
-    embed = info_embed(
-        "📖 Règles de la guilde",
-        "Lis attentivement puis clique sur **J'accepte les règles**.",
-    )
-    embed.add_field(
-        name="Règles",
-        value=(
-            "• Respect entre membres obligatoire\n"
-            "• Pas de spam / pas de pub externe\n"
-            "• Utiliser les bons salons pour les bons sujets\n"
-            "• Signaler tout problème via #déclaration\n"
-            "• Participer aux déploiements dans la mesure du possible\n"
-            "• Ne pas trahir les infos internes à la guilde\n"
-            "• Contribuer selon ses moyens (temps, ressources, silver)"
+    embed = discord.Embed(
+        description=(
+            "-# RÈGLEMENT PPCF\n"
+            "## 📖  RÈGLES\n\n"
+            "• **Respect** entre membres, zéro harcèlement.\n"
+            "• Pas de spam, pas de pub hors guilde.\n"
+            "• Utilise le **bon salon** pour le bon sujet.\n"
+            "• **Tout don** (silver ou items) se déclare via un **ticket** dans #✉️ declaration. "
+            "Pas de don « dans le vide ».\n"
+            "• La guilde fonctionne à la **confiance**. Les promotions aussi : "
+            "on avance selon l'activité et la parole donnée, pas selon le copinage.\n"
+            "• Participe aux déploiements quand tu peux.\n"
+            "• Ne divulgue pas les infos internes (sorties, coffre, tickets).\n"
+            "• Signale un problème via le ticket **Problème**.\n\n"
+            "Clique **J'accepte les règles** une fois que c'est lu."
         ),
-        inline=False,
+        color=discord.Color.orange(),
     )
+    embed.set_footer(text="Albion PPCF • Fort Sterling")
     return embed
 
 
-def build_guide_embed() -> discord.Embed:
-    embed = info_embed(
-        "🎓 Guide nouveau membre",
-        "Voici comment fonctionne le serveur.",
-    )
-    embed.add_field(
-        name="Salons",
-        value=(
-            "❗ **Important** : règles, guide, rôles, leaderboard, ordres\n"
-            "🔒 **Officier** : gestion, alertes, backups\n"
-            "🏦 **Banque** : trésorerie, historique, déclaration\n"
-            "🍺 **Taverne** : général, quêtes, LFG\n"
-            "⚔️ **Caserne** : déploiements, promotions, killboard\n"
-            "📊 **Marché** : prix, alertes, craft"
+def build_guide_embeds() -> list[discord.Embed]:
+    color = discord.Color.dark_gold()
+    e1 = discord.Embed(
+        description=(
+            "-# GUIDE NOUVEAU\n"
+            "## 🎓  COMMENT FONCTIONNE LE SERVEUR\n\n"
+            "Lis ce salon une fois, ça suffit pour tout le reste.\n\n"
+            "1. Accepte les **règles**\n"
+            "2. **Complète ton profil** (style + pseudo Albion)\n"
+            "3. Prends tes **rôles** dans #🎭 rôles (style + Tank/DPS/Healer/Support)\n"
+            "4. Ensuite tu peux tout utiliser : ordres, quêtes, sorties, banque, marché"
         ),
-        inline=False,
+        color=color,
     )
-    embed.add_field(
-        name="Systèmes",
-        value=(
-            "• **Ordres prioritaires** : participe dans #ordre-prioritaire\n"
-            "• **Déclaration** : tickets via les boutons de #declaration\n"
-            "• **Déploiements** : inscris-toi dans #déploiement\n"
-            "• **Marché** : `/prix` dans #commandes-marché\n"
-            "• **Contribution** : Recrue → Chevalier selon activité"
+    e2 = discord.Embed(
+        description=(
+            "## 🎯  ORDRES PRIORITAIRES\n\n"
+            "Missions de guilde numérotées (#001…) dans #🎯 ordre-prioritaire.\n"
+            "• Clique **Accepter** pour t'inscrire.\n"
+            "• La barre avance toute seule (fame, silver déposé, items apportés) ou via **Progression**.\n"
+            "• **Quota atteint** = ordre **réussi** + points.\n"
+            "• **Délai dépassé** = ordre **échoué**, **aucun point**.\n"
+            "• 24h après, l'ordre part dans #📜 ordres-passés.\n"
+            "`/ordre_info` pour revoir une fiche."
         ),
-        inline=False,
+        color=color,
     )
-    embed.add_field(
-        name="Commandes principales",
-        value="`/profil` `/profil_pseudo` `/profil_role` `/setup` `/ping`",
-        inline=False,
+    e3 = discord.Embed(
+        description=(
+            "## 📋  QUÊTES\n\n"
+            "Mini-sorties entre membres, max **3** joueurs, dans #📋 tableau-des-quêtes.\n"
+            "`/quete` pour poster. **Participer** / **Terminer** (créateur seulement).\n"
+            "Le message disparaît 6h après la fin."
+        ),
+        color=color,
     )
-    return embed
+    e4 = discord.Embed(
+        description=(
+            "## 🐴  DÉPLOIEMENTS\n\n"
+            "Sorties de guilde (ZvZ, donjon, gank…) dans #🐴 déploiement.\n"
+            "Prends le rôle **🐴 déploiement** pour être ping.\n"
+            "`/deployer` (officiers). Réponds ✅ / ⏳ / ❌ + ton rôle (Tank/DPS/Healer/Support).\n"
+            "Rappel **en DM uniquement** 10 min avant, si tu es inscrit."
+        ),
+        color=color,
+    )
+    e5 = discord.Embed(
+        description=(
+            "## 💰  BANQUE & DONS\n\n"
+            "Le coffre est dans #💰 trésorie (oui, sans « r »).\n"
+            "**Tout don se déclare** avec un ticket **💰 Don** dans #✉️ declaration. "
+            "Le Grand Trésorier est prévenu en DM.\n"
+            "Historique : #📜 historique.\n"
+            "Demandes de stuff : ticket **Craft** ou `/ressource_ajouter` (trésorier).\n\n"
+            "On ne « balance » pas du silver en jeu sans ticket : la banque se base sur **ta déclaration**."
+        ),
+        color=color,
+    )
+    e6 = discord.Embed(
+        description=(
+            "## 🏅  PROMOTIONS & CONFIANCE\n\n"
+            "Recrue → Chevalier → Officier… selon l'activité **et** la confiance.\n"
+            "Pas de quota magique : si tu tiens parole (dons déclarés, ordres, sorties), ça se voit.\n"
+            "Les promos sont affichées dans #🏅 promotion. `/promotion` / `/retrograder` (staff).\n\n"
+            "## 🛒  MARCHÉ\n"
+            "`/prix` `/historique_prix` `/watchlist_ajouter` dans #🛒 commandes-marché. "
+            "Alertes auto dans #🚨 alertes-prix.\n\n"
+            "## 💀  KILLBOARD\n"
+            "Tes kills/morts de guilde dans #💀 champ-de-bataille — il te faut `/profil_pseudo`.\n\n"
+            "`/aide` pour la liste des commandes."
+        ),
+        color=color,
+    )
+    for embed in (e1, e2, e3, e4, e5, e6):
+        embed.set_footer(text="Albion PPCF • Fort Sterling")
+    return [e1, e2, e3, e4, e5, e6]
 
 
 def build_welcome_embed(member: discord.Member | discord.User) -> discord.Embed:
@@ -427,7 +493,11 @@ class Onboarding(commands.Cog):
 
     @app_commands.command(name="completer_profil", description="Ouvre le formulaire de profil (même action que le bouton).")
     async def completer_profil(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(ProfileModal())
+        await interaction.response.send_message(
+            embed=info_embed("Profil de guilde", "Choisis ton style de jeu :"),
+            view=GameplaySelectView(),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="profil", description="Affiche ton profil de guilde.")
     async def profil(self, interaction: discord.Interaction) -> None:

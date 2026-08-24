@@ -1,4 +1,4 @@
-"""Phase 2 — Salon #rôles : boutons toggle des rôles de classe."""
+"""Phase 2 — Salon #rôles : style de jeu + classes + pings."""
 
 from __future__ import annotations
 
@@ -9,21 +9,26 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.config import CLASS_ROLE_KEYS, ROLE_NAMES, settings
+from bot.config import CLASS_ROLE_KEYS, PLAYSTYLE_ROLE_KEYS, ROLE_NAMES, settings
 from bot.database.crud import get_or_create_member
 from bot.database.engine import session_scope
 from bot.utils.embeds import error_embed, info_embed, success_embed
-from bot.utils.permissions import find_channel, find_role, is_guild_master, is_officer
+from bot.utils.permissions import find_channel, find_role, is_guild_master, is_officer, role_by_name
 
 LOGGER = logging.getLogger(__name__)
 
 ROLE_BUTTONS: tuple[tuple[str, str, discord.ButtonStyle], ...] = (
-    ("tank", "🛡️ Tank", discord.ButtonStyle.secondary),
-    ("dps", "⚔️ DPS", discord.ButtonStyle.secondary),
-    ("healer", "💚 Healer", discord.ButtonStyle.secondary),
-    ("support", "🌿 Support", discord.ButtonStyle.secondary),
-    ("lfg", "👥 Recherche-de-groupe", discord.ButtonStyle.primary),
-    ("deployment", "🐴 Déploiement", discord.ButtonStyle.primary),
+    ("pvp", "⚔️ PVP", discord.ButtonStyle.secondary),
+    ("pve", "🛡️ PVE", discord.ButtonStyle.secondary),
+    ("gathering", "⛏️ Gathering", discord.ButtonStyle.secondary),
+    ("craft", "🔨 Craft / Éco", discord.ButtonStyle.secondary),
+    ("polyvalent", "🎲 Polyvalent", discord.ButtonStyle.secondary),
+    ("tank", "🛡️ Tank", discord.ButtonStyle.primary),
+    ("dps", "⚔️ DPS", discord.ButtonStyle.primary),
+    ("healer", "💚 Healer", discord.ButtonStyle.primary),
+    ("support", "🌿 Support", discord.ButtonStyle.primary),
+    ("lfg", "👥 LFG", discord.ButtonStyle.success),
+    ("deployment", "🐴 Déploiement", discord.ButtonStyle.success),
 )
 
 
@@ -49,17 +54,29 @@ class ClassRoleButton(discord.ui.Button["ClassRolesView"]):
         pretty = ROLE_NAMES.get(self.role_key, self.role_key)
         if role is None:
             await interaction.response.send_message(
-                embed=error_embed("Rôle introuvable", f"Le rôle **{pretty}** n'existe pas sur le serveur."),
+                embed=error_embed("Rôle introuvable", f"Le rôle **{pretty}** n'existe pas. Relance `/setup_roles`."),
                 ephemeral=True,
             )
             return
 
+        exclusive = self.role_key in PLAYSTYLE_ROLE_KEYS
         added = role not in user.roles
         try:
-            if added:
-                await user.add_roles(role, reason="Toggle rôle classe")
+            if exclusive and added:
+                extras = []
+                for other in PLAYSTYLE_ROLE_KEYS:
+                    if other == self.role_key:
+                        continue
+                    other_role = find_role(guild, other)
+                    if other_role and other_role in user.roles:
+                        extras.append(other_role)
+                if extras:
+                    await user.remove_roles(*extras, reason="Un seul style de jeu")
+                await user.add_roles(role, reason="Style de jeu")
+            elif added:
+                await user.add_roles(role, reason="Toggle rôle")
             else:
-                await user.remove_roles(role, reason="Toggle rôle classe")
+                await user.remove_roles(role, reason="Toggle rôle")
         except discord.Forbidden:
             await interaction.response.send_message(
                 embed=error_embed("Permissions bot", "Le bot ne peut pas gérer ce rôle (place-le plus haut)."),
@@ -70,7 +87,12 @@ class ClassRoleButton(discord.ui.Button["ClassRolesView"]):
         async with session_scope() as session:
             member = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
             roles_state = dict(member.class_roles or {})
-            roles_state[self.role_key] = added
+            if exclusive and added:
+                for other in PLAYSTYLE_ROLE_KEYS:
+                    roles_state[other] = other == self.role_key
+                member.preferred_gameplay = self.role_key
+            else:
+                roles_state[self.role_key] = added
             member.class_roles = roles_state
 
         prefix = "✅ Rôle ajouté" if added else "❌ Rôle retiré"
@@ -78,8 +100,6 @@ class ClassRoleButton(discord.ui.Button["ClassRolesView"]):
 
 
 class ClassRolesView(discord.ui.View):
-    """Vue persistante des 6 boutons de rôles."""
-
     def __init__(self) -> None:
         super().__init__(timeout=None)
         for key, label, style in ROLE_BUTTONS:
@@ -87,21 +107,33 @@ class ClassRolesView(discord.ui.View):
 
 
 def build_roles_embed() -> discord.Embed:
-    embed = info_embed(
-        "🎭 Choisis tes rôles",
-        "Clique pour **ajouter** ou **retirer** un rôle. Tu peux en cumuler autant que tu veux.",
+    embed = discord.Embed(
+        description=(
+            "-# RÔLES\n"
+            "## 🎭  CHOISIS TES RÔLES\n\n"
+            "Clique pour **ajouter** ou **retirer**. "
+            "Le **style de jeu** est unique (un seul à la fois).\n\n"
+            "**Style** — PVP · PVE · Gathering · Craft / Économie · Polyvalent\n"
+            "**Classe** — Tank · DPS · Healer · Support\n"
+            "**Pings** — LFG · 🐴 déploiement"
+        ),
+        color=discord.Color.purple(),
     )
-    embed.add_field(
-        name="Classes",
-        value="🛡️ Tank • ⚔️ DPS • 💚 Healer • 🌿 Support",
-        inline=False,
-    )
-    embed.add_field(
-        name="Notifications",
-        value="👥 recherche-de-groupe • 🐴 déploiement",
-        inline=False,
-    )
+    embed.set_footer(text="Albion PPCF • Fort Sterling")
     return embed
+
+
+async def ensure_toggle_roles(guild: discord.Guild) -> list[str]:
+    created: list[str] = []
+    for key in (*PLAYSTYLE_ROLE_KEYS, "tank", "dps", "healer", "support", "lfg", "deployment"):
+        name = ROLE_NAMES[key]
+        if role_by_name(guild, name) is None:
+            try:
+                await guild.create_role(name=name, mentionable=True, reason="setup_roles")
+                created.append(name)
+            except discord.HTTPException:
+                LOGGER.warning("Création rôle %s impossible", name)
+    return created
 
 
 class Roles(commands.Cog):
@@ -111,24 +143,27 @@ class Roles(commands.Cog):
     async def cog_load(self) -> None:
         self.bot.add_view(ClassRolesView())
 
-    @app_commands.command(name="setup_roles", description="Poste le panneau de rôles dans #rôles.")
+    @app_commands.command(name="setup_roles", description="Poste le panneau de rôles dans #rôles (crée les rôles manquants).")
     @app_commands.guild_only()
     async def setup_roles(self, interaction: discord.Interaction) -> None:
         if not isinstance(interaction.user, discord.Member) or not _can_setup(interaction.user):
             await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         assert guild is not None
+        created = await ensure_toggle_roles(guild)
         channel = find_channel(guild, "roles")
         if channel is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=error_embed("Salon introuvable", "Impossible de trouver #rôles."),
                 ephemeral=True,
             )
             return
         await channel.send(embed=build_roles_embed(), view=ClassRolesView())
-        await interaction.response.send_message(
-            embed=success_embed("Panneau rôles posté", channel.mention),
+        extra = f"\nRôles créés : {', '.join(created)}" if created else ""
+        await interaction.followup.send(
+            embed=success_embed("Panneau rôles posté", channel.mention + extra),
             ephemeral=True,
         )
 

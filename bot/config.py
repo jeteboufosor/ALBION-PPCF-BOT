@@ -85,9 +85,23 @@ ROLE_NAMES: Final[dict[str, str]] = {
     "support": "🌿 Support",
     "lfg": "👥 recherche-de-groupe",
     "deployment": "🐴 déploiement",
+    "pvp": "PVP",
+    "pve": "PVE",
+    "gathering": "Gathering",
+    "craft": "Craft / Économie",
+    "polyvalent": "Polyvalent",
 }
 
-CLASS_ROLE_KEYS: Final[tuple[str, ...]] = ("tank", "dps", "healer", "support", "lfg", "deployment")
+PLAYSTYLE_ROLE_KEYS: Final[tuple[str, ...]] = ("pvp", "pve", "gathering", "craft", "polyvalent")
+CLASS_ROLE_KEYS: Final[tuple[str, ...]] = (
+    "tank",
+    "dps",
+    "healer",
+    "support",
+    "lfg",
+    "deployment",
+    *PLAYSTYLE_ROLE_KEYS,
+)
 ADMIN_ROLE_KEYS: Final[tuple[str, ...]] = ("guild_master",)
 ORDER_MANAGER_ROLE_KEYS: Final[tuple[str, ...]] = ("war_lord", "grand_treasurer")
 OFFICER_ROLE_KEYS: Final[tuple[str, ...]] = ("guild_master", "war_lord", "grand_treasurer", "officer")
