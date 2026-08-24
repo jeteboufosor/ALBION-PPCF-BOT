@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import ContributionScore, Member, Order, TreasuryState, utcnow
+from bot.database.models import ContributionScore, Member, Order, Ticket, TreasuryState, utcnow
 
 
 async def get_member_by_discord_id(session: AsyncSession, discord_id: int) -> Member | None:
@@ -47,6 +47,11 @@ async def next_order_number(session: AsyncSession) -> int:
     return int(result.scalar_one())
 
 
+async def next_ticket_number(session: AsyncSession) -> int:
+    result = await session.execute(select(func.coalesce(func.max(Ticket.ticket_number), 0) + 1))
+    return int(result.scalar_one())
+
+
 async def list_top_scores(
     session: AsyncSession,
     column: str,
@@ -59,7 +64,14 @@ async def list_top_scores(
     total_silver_donated, total_fame.
     """
 
-    if column not in {"order_points_all_time", "order_points_monthly", "total_silver_donated", "total_fame"}:
+    if column not in {
+        "order_points_all_time",
+        "order_points_monthly",
+        "total_silver_donated",
+        "silver_donated_monthly",
+        "total_fame",
+        "fame_monthly",
+    }:
         raise ValueError(f"Colonne leaderboard invalide: {column}")
 
     score_column = getattr(ContributionScore, column)

@@ -42,7 +42,17 @@ def info_embed(title: str, description: str | None = None) -> discord.Embed:
     return base_embed(title, description, color=ALBION_BLUE)
 
 
-def progress_bar(current: int, target: int, *, width: int = 10) -> str:
+def discord_timestamp(value: datetime, style: str = "R") -> str:
+    """Timestamp Discord natif : <t:1787511600:R>."""
+
+    from datetime import UTC
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return discord.utils.format_dt(value, style=style)  # type: ignore[arg-type]
+
+
+def progress_bar(current: int, target: int, *, width: int = 24) -> str:
     """Barre de progression texte adaptée aux embeds."""
 
     if target <= 0:

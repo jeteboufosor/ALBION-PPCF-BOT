@@ -13,10 +13,12 @@ import sys
 from datetime import UTC, datetime
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from bot.config import settings
 from bot.database.engine import dispose_engine, init_db
+from bot.tasks.scheduler import start_scheduler, stop_scheduler
 
 
 def configure_logging() -> None:
@@ -44,6 +46,8 @@ class AlbionGuildBot(commands.Bot):
 
         await init_db()
         await self._load_available_cogs()
+        start_scheduler(self)
+        self.tree.on_error = self.on_app_command_error
 
         if settings.sync_commands_on_start:
             if settings.guild_id:
@@ -89,7 +93,26 @@ class AlbionGuildBot(commands.Bot):
         guilds = ", ".join(guild.name for guild in self.guilds) or "aucune guilde"
         self.logger.info("Connecté en tant que %s (%s) | Guildes: %s", self.user, self.user.id if self.user else "?", guilds)
 
+    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Évite le toast rouge si la commande a déjà répondu / est trop longue."""
+
+        original = getattr(error, "original", error)
+        if isinstance(original, discord.errors.NotFound):
+            return
+        if isinstance(original, discord.HTTPException) and getattr(original, "code", None) == 40060:
+            return
+        self.logger.exception("Erreur commande /%s", getattr(interaction.command, "name", "?"))
+        msg = "Une erreur est survenue. Réessaie dans un instant."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
     async def close(self) -> None:
+        stop_scheduler()
         await super().close()
         await dispose_engine()
 
@@ -97,7 +120,7 @@ class AlbionGuildBot(commands.Bot):
 async def run_bot() -> None:
     configure_logging()
     if not settings.discord_token:
-        raise RuntimeError("DISCORD_TOKEN manquant. Copiez .env.example vers .env et renseignez le token.")
+        raise RuntimeError("DISCORD_TOKEN manquant. Configure-le dans Railway (Variables).")
 
     bot = AlbionGuildBot()
     async with bot:

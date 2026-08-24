@@ -225,4 +225,3 @@ __marimo__/
 *.sqlite
 *.sqlite3
 .env.*
-!.env.example

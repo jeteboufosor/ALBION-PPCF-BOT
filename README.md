@@ -1,135 +1,95 @@
-# Albion PPCF Bot Discord
+# Albion PPCF Bot
 
-Bot Discord async pour une guilde Albion Online basée à Fort Sterling.
+Bot Discord (Python / discord.py / SQLAlchemy async) pour la guilde **PPCF** — Fort Sterling.
 
-Ce dépôt est développé en 7 phases. La **Phase 1 — Fondations** met en place l'architecture, la configuration, la base de données async, les modèles, les utilitaires et les clients API.
+Déploiement : Railway + PostgreSQL. Processus : `python -m bot.main`.
 
-## Stack
+## Variables Railway
 
-- Python 3.11+
-- discord.py 2.x avec slash commands
-- SQLAlchemy 2.0 async (`Mapped[]`, `mapped_column()`)
-- SQLite local via `aiosqlite`
-- PostgreSQL Railway via `asyncpg`
-- httpx
-- APScheduler
-- python-dotenv
-
-## Structure
-
-```text
-bot/
-├── main.py
-├── config.py
-├── cogs/
-├── services/
-│   ├── albion_api.py
-│   ├── market_api.py
-│   └── item_service.py
-├── database/
-│   ├── engine.py
-│   ├── models.py
-│   └── crud.py
-├── tasks/
-└── utils/
-    ├── cache.py
-    ├── embeds.py
-    ├── permissions.py
-    └── helpers.py
+```
+DISCORD_TOKEN
+GUILD_ID
+ALBION_GUILD_ID
+DATABASE_URL
+TEST_MODE=false
+SYNC_COMMANDS_ON_START=true
+RESET_DATABASE=true
 ```
 
-## Installation locale
+`RESET_DATABASE=true` **une seule fois** au premier deploy de lancement (wipe total). **Supprime la variable juste après** sinon chaque redémarrage vide la base.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-pip install -r requirements.txt
-cp .env.example .env
-```
+**Ne définis pas** `ALBION_API_BASE_URL` / `ALBION_MARKET_BASE_URL` sauf pour forcer autre chose que l’Europe.
 
-Renseignez au minimum dans `.env` :
+## API Albion — Europe uniquement
 
-```env
-DISCORD_TOKEN=token_du_bot
-GUILD_ID=id_du_serveur_discord
-ALBION_GUILD_ID=id_de_la_guilde_albion
-```
+| Usage | URL |
+|---|---|
+| Gameinfo (joueurs, fame, kills, guilde) | `https://gameinfo-ams.albiononline.com/api/gameinfo` |
+| Recherche joueur | `…/search?q=PSEUDO` |
+| Joueur | `…/players/{id}` |
+| Stats fame | `…/players/{id}/statistics` |
+| Kills / morts | `…/players/{id}/kills` · `…/deaths` |
+| Membres de guilde | `…/guilds/{ALBION_GUILD_ID}/members` |
+| Killboard events | `…/events?limit=50` |
+| Marché (prix / histo) | `https://europe.albion-online-data.com/api/v2/stats` |
+| Prix | `…/prices/{ITEM_ID}?locations=Fort Sterling` |
+| Historique | `…/history/{ITEM_ID}?locations=Fort Sterling&time-scale=24` |
+| Icônes items | `https://render.albiononline.com/v1/item/{ITEM_ID}.png` |
+| Portrait équipé | `https://render.albiononline.com/v1/character/{slots}.png?size=512` |
+| Catalogue items FR | `https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/items.json` |
+| Craft (lien) | `https://albion.tools/crafting?item={ITEM_ID}` |
 
-En local, laissez `DATABASE_URL` vide. Le bot utilisera automatiquement :
+Amérique (à **ne pas** utiliser) : `gameinfo.albiononline.com` · `west.albion-online-data.com`  
+Asie : `gameinfo-sgp.albiononline.com` · `east.albion-online-data.com`
 
-```text
-sqlite+aiosqlite:///./data/albion_guild_bot.db
-```
+## Après chaque deploy
 
-## Lancer le bot
+1. `/admin_sync`
+2. Une fois : `/setup` puis les `/setup_*` (onboarding, rôles, trésorerie, déclaration, leaderboard)
+3. Chaque membre : `/profil_pseudo` (killboard + fame auto)
 
-```bash
-python -m bot.main
-```
+Les dates se saisissent en timestamp Discord : `<t:1787511600:R>`.
 
-Au démarrage, le bot :
+Salon banque réel : `#💰 trésorie`. Rôle sorties : `🐴 déploiement`.
 
-1. charge les variables `.env`,
-2. détecte SQLite ou PostgreSQL,
-3. crée les tables manquantes,
-4. charge automatiquement les cogs présents dans `bot/cogs`,
-5. synchronise les slash commands.
+## Commandes
 
-## Base de données
+Tape `/aide` en jeu (boutons Membre / Ordres / Banque / Sorties / Staff).
 
-La détection se fait dans `bot/database/engine.py` :
+### Membre
+`/profil` `/profil_pseudo` `/profil_role` `/completer_profil` `/leaderboard`
 
-- `DATABASE_URL` vide → SQLite local avec `aiosqlite` ;
-- `postgresql://...` ou `postgres://...` → conversion automatique en `postgresql+asyncpg://...` pour Railway ;
-- `postgresql+asyncpg://...` → utilisé tel quel.
+### Marché (réponses publiques, watchlist privée)
+`/prix` `/prix_comparer` `/black_market` `/historique_prix` `/craft_profit`  
+`/watchlist` `/watchlist_ajouter` `/watchlist_supprimer`
 
-Les modèles de la Phase 1 couvrent toutes les tables prévues : membres, ordres, quêtes, contributions, trésorerie, tickets, déploiements, promotions, killboard, marché, snapshots fame, backups et santé bot.
+### Ordres & quêtes
+`/ordre_creer` `/ordre_info` `/quete`
 
-## Déploiement Railway
+Auto : fame PvE / gathering (API), silver (dépôt), item (apport ressource).  
+Quota → réussi + points. Délai dépassé → échoué, 0 point.
 
-Les fichiers nécessaires sont déjà présents :
+### Banque
+`/tresorerie_depot` `/tresorerie_retrait` `/dette_*` `/ressource_*`  
+Donateur **obligatoire** sur dépôt et ressource.
 
-- `Procfile` : `worker: python -m bot.main`
-- `runtime.txt` : `3.11`
-- `requirements.txt`
+### Sorties
+`/deployer` `/deployer_fin` — rappels **DM uniquement** à T-10.  
+`/promotion` `/retrograder`
 
-Variables Railway à prévoir :
+### Staff
+`/setup` `/setup_onboarding` `/setup_roles` `/setup_tresorerie` `/setup_declaration` `/setup_leaderboard`  
+`/admin_statut` `/admin_sync` `/save` `/backup_info`  
+`/test_alertes_prix` `/test_cleanup_ordres`
 
-```env
-DISCORD_TOKEN=...
-GUILD_ID=...
-ALBION_GUILD_ID=...
-DATABASE_URL=... # fourni par PostgreSQL Railway
-```
+## Cron (Europe/Berlin)
 
-Le code convertit automatiquement l'URL Railway PostgreSQL vers le driver asyncpg.
-
-## Tester la Phase 1
-
-Sans lancer Discord, vérifiez la syntaxe et la création de DB :
-
-```bash
-python -m compileall bot
-python - <<'PY'
-import asyncio
-from bot.database.engine import init_db, dispose_engine, DATABASE_URL
-
-async def main():
-    print(DATABASE_URL)
-    await init_db()
-    await dispose_engine()
-
-asyncio.run(main())
-PY
-```
-
-Vous devez obtenir une base SQLite dans `data/` si `DATABASE_URL` est vide.
-
-## Phases suivantes
-
-- Phase 2 : onboarding + salon rôles
-- Phase 3 : ordres prioritaires + quêtes
-- Phase 4 : trésorerie + tickets
-- Phase 5 : déploiement + promotion
-- Phase 6 : marché + killboard
-- Phase 7 : leaderboard + backup + admin + tâches finales
+| Quand | Quoi |
+|---|---|
+| 1 min | deadlines ordres, rappels déploiement |
+| 5 min | killboard, fame ordres |
+| 15 min | archive, watchlist prix |
+| 04h00 | backup `#backup-sql` |
+| 20h00 | rapport `#alertes-prix` |
+| 1er 00h05 | reset scores mensuels |
+| lundi 09h | santé `#alertes-bot` |

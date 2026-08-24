@@ -88,6 +88,9 @@ class Order(Base, TimestampMixin):
     reward_others: Mapped[str | None] = mapped_column(Text)
     points_value: Mapped[int] = mapped_column(Integer, nullable=False)
     creator_discord_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cancelled_by_discord_id: Mapped[int | None] = mapped_column(BigInteger)
+    completed_by_discord_id: Mapped[int | None] = mapped_column(BigInteger)
+    close_reason: Mapped[str | None] = mapped_column(String(40))
     channel_id: Mapped[int | None] = mapped_column(BigInteger)
     message_id: Mapped[int | None] = mapped_column(BigInteger)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -109,6 +112,7 @@ class OrderParticipant(Base, TimestampMixin):
     contribution_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     contribution_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     points_awarded: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    baseline_fame: Mapped[int | None] = mapped_column(Integer)
     accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     order: Mapped[Order] = relationship(back_populates="participants")
@@ -160,7 +164,10 @@ class ContributionScore(Base, TimestampMixin):
     order_points_all_time: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     order_points_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_silver_donated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    silver_donated_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_fame: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fame_monthly: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fame_baseline: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     monthly_period: Mapped[str] = mapped_column(String(7), default="", nullable=False)  # YYYY-MM
 
     member: Mapped[Member] = relationship(back_populates="contribution_score")
@@ -209,6 +216,7 @@ class TreasuryState(Base, TimestampMixin):
     total_deposited: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_withdrawn: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     treasury_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    leaderboard_message_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Debt(Base, TimestampMixin):
@@ -237,6 +245,7 @@ class ResourceRequest(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     item_name: Mapped[str] = mapped_column(String(180), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_quantity: Mapped[int | None] = mapped_column(Integer)
     requester_member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"))
     reason: Mapped[str | None] = mapped_column(Text)
     urgency: Mapped[str | None] = mapped_column(String(30))
@@ -300,6 +309,7 @@ class DeploymentResponse(Base, TimestampMixin):
     member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), nullable=False)
     response: Mapped[str] = mapped_column(String(20), nullable=False)  # yes, maybe, no
     class_role: Mapped[str | None] = mapped_column(String(30))
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     deployment: Mapped[Deployment] = relationship(back_populates="responses")
     member: Mapped[Member] = relationship(back_populates="deployment_responses")

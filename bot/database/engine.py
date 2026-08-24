@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import DATA_DIR, settings
@@ -57,15 +58,54 @@ engine: AsyncEngine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 
 
+async def _add_missing_order_columns(conn) -> None:
+    """Ajoute les colonnes d'audit si la table orders existait déjà."""
+
+    statements = (
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelled_by_discord_id BIGINT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by_discord_id BIGINT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS close_reason VARCHAR(40)",
+        "ALTER TABLE resource_requests ADD COLUMN IF NOT EXISTS original_quantity INTEGER",
+        "ALTER TABLE deployment_responses ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ",
+        "ALTER TABLE contribution_scores ADD COLUMN IF NOT EXISTS silver_donated_monthly INTEGER DEFAULT 0",
+        "ALTER TABLE contribution_scores ADD COLUMN IF NOT EXISTS fame_monthly INTEGER DEFAULT 0",
+        "ALTER TABLE contribution_scores ADD COLUMN IF NOT EXISTS fame_baseline INTEGER DEFAULT 0",
+        "ALTER TABLE order_participants ADD COLUMN IF NOT EXISTS baseline_fame INTEGER",
+        "ALTER TABLE treasury_state ADD COLUMN IF NOT EXISTS leaderboard_message_id BIGINT",
+    )
+    if IS_SQLITE:
+        statements = (
+            "ALTER TABLE orders ADD COLUMN cancelled_by_discord_id BIGINT",
+            "ALTER TABLE orders ADD COLUMN completed_by_discord_id BIGINT",
+            "ALTER TABLE orders ADD COLUMN close_reason VARCHAR(40)",
+            "ALTER TABLE resource_requests ADD COLUMN original_quantity INTEGER",
+            "ALTER TABLE deployment_responses ADD COLUMN reminded_at DATETIME",
+            "ALTER TABLE contribution_scores ADD COLUMN silver_donated_monthly INTEGER DEFAULT 0",
+            "ALTER TABLE contribution_scores ADD COLUMN fame_monthly INTEGER DEFAULT 0",
+            "ALTER TABLE contribution_scores ADD COLUMN fame_baseline INTEGER DEFAULT 0",
+            "ALTER TABLE order_participants ADD COLUMN baseline_fame INTEGER",
+            "ALTER TABLE treasury_state ADD COLUMN leaderboard_message_id BIGINT",
+        )
+    for stmt in statements:
+        try:
+            await conn.execute(text(stmt))
+        except Exception:
+            pass
+
+
 async def init_db() -> None:
-    """Crée les tables manquantes.
+    """Crée les tables. Si RESET_DATABASE=true : drop total puis recréation vide."""
 
-    Suffisant pour le développement local. En production, on pourra ajouter Alembic
-    quand le schéma sera stabilisé.
-    """
+    import logging
 
+    logger = logging.getLogger(__name__)
     async with engine.begin() as conn:
+        if settings.reset_database:
+            logger.warning("RESET_DATABASE=true — suppression de TOUTES les tables")
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        if not settings.reset_database:
+            await _add_missing_order_columns(conn)
 
 
 async def dispose_engine() -> None:

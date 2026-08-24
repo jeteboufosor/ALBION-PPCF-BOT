@@ -48,12 +48,12 @@ class Settings:
 
     albion_api_base_url: str = field(
         default_factory=lambda: os.getenv(
-            "ALBION_API_BASE_URL", "https://gameinfo.albiononline.com/api/gameinfo"
+            "ALBION_API_BASE_URL", "https://gameinfo-ams.albiononline.com/api/gameinfo"
         )
     )
     albion_market_base_url: str = field(
         default_factory=lambda: os.getenv(
-            "ALBION_MARKET_BASE_URL", "https://www.albion-online-data.com/api/v2/stats"
+            "ALBION_MARKET_BASE_URL", "https://europe.albion-online-data.com/api/v2/stats"
         )
     )
     albion_tools_base_url: str = field(default_factory=lambda: os.getenv("ALBION_TOOLS_BASE_URL", "https://albion.tools"))
@@ -61,6 +61,8 @@ class Settings:
     command_prefix: str = field(default_factory=lambda: os.getenv("COMMAND_PREFIX", "!"))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     sync_commands_on_start: bool = field(default_factory=lambda: _bool_env("SYNC_COMMANDS_ON_START", True))
+    test_mode: bool = field(default_factory=lambda: _bool_env("TEST_MODE", False))
+    reset_database: bool = field(default_factory=lambda: _bool_env("RESET_DATABASE", False))
     default_timezone: str = field(default_factory=lambda: os.getenv("DEFAULT_TIMEZONE", "UTC"))
 
     alerts_channel_id: int | None = field(default_factory=lambda: _int_env("ALERTS_CHANNEL_ID"))
@@ -72,7 +74,7 @@ settings = Settings()
 # Noms canoniques des rôles Discord.
 ROLE_NAMES: Final[dict[str, str]] = {
     "guild_master": "🟠 Maître de Guilde",
-    "war_lord": "🟡 Seigneur de Guerre",
+    "war_lord": "🟡 Maître de Guerre",
     "grand_treasurer": "🔴 Grand Trésorier",
     "officer": "🟢 Officier",
     "knight": "🟣 Chevalier",
@@ -83,10 +85,24 @@ ROLE_NAMES: Final[dict[str, str]] = {
     "healer": "💚 Healer",
     "support": "🌿 Support",
     "lfg": "👥 recherche-de-groupe",
-    "deployment": "🐺 déploiement",
+    "deployment": "🐴 déploiement",
+    "pvp": "PVP",
+    "pve": "PVE",
+    "gathering": "Gathering",
+    "craft": "Craft / Économie",
+    "polyvalent": "Polyvalent",
 }
 
-CLASS_ROLE_KEYS: Final[tuple[str, ...]] = ("tank", "dps", "healer", "support", "lfg", "deployment")
+PLAYSTYLE_ROLE_KEYS: Final[tuple[str, ...]] = ("pvp", "pve", "gathering", "craft", "polyvalent")
+CLASS_ROLE_KEYS: Final[tuple[str, ...]] = (
+    "tank",
+    "dps",
+    "healer",
+    "support",
+    "lfg",
+    "deployment",
+    *PLAYSTYLE_ROLE_KEYS,
+)
 ADMIN_ROLE_KEYS: Final[tuple[str, ...]] = ("guild_master",)
 ORDER_MANAGER_ROLE_KEYS: Final[tuple[str, ...]] = ("war_lord", "grand_treasurer")
 OFFICER_ROLE_KEYS: Final[tuple[str, ...]] = ("guild_master", "war_lord", "grand_treasurer", "officer")
@@ -114,7 +130,7 @@ CHANNEL_NAMES: Final[dict[str, str]] = {
     "lfg": "👥 recherche-de-groupe",
     "arrival_departure": "🏰 arrivé-départ",
     "bot_commands": "🤖 commandes-bot",
-    "deployment": "🐺 déploiement",
+    "deployment": "🐴 déploiement",
     "promotion": "🏅 promotion",
     "battlefield": "💀 champ-de-bataille",
     "market_commands": "🛒 commandes-marché",
