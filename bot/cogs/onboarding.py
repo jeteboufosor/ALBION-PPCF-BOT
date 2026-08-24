@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from urllib.parse import quote
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -48,8 +50,34 @@ RULES_CUSTOM_ID = "onboarding:accept_rules"
 PROFILE_CUSTOM_ID = "onboarding:open_profile"
 
 
+def _equip_token(item: dict[str, Any] | None) -> str:
+    if not item:
+        return ""
+    typ = item.get("Type") or item.get("TypeName") or ""
+    if not typ:
+        return ""
+    enchant = int(item.get("EnchantmentLevel") or 0)
+    quality = int(item.get("Quality") or 1)
+    if enchant:
+        return f"{typ}@{enchant}?{quality}"
+    return f"{typ}?{quality}"
+
+
+def character_render_url(equipment: dict[str, Any] | None) -> str | None:
+    """Portrait équipé via l'API Render officielle."""
+
+    if not equipment:
+        return None
+    order = ("MainHand", "OffHand", "Head", "Armor", "Shoes", "Bag", "Cape", "Mount", "Potion", "Food")
+    parts = [_equip_token(equipment.get(slot) if isinstance(equipment.get(slot), dict) else None) for slot in order]
+    if not any(parts):
+        return None
+    code = "|".join(parts)
+    return f"https://render.albiononline.com/v1/character/{quote(code, safe='@?|_')}.png?size=512"
+
+
 async def build_member_profile_embed(user: discord.abc.User) -> discord.Embed:
-    """Fiche profil : stats guilde + portrait Albion si le pseudo est trouvé."""
+    """Fiche profil : dons, points, fame + portrait équipé Albion."""
 
     async with session_scope() as session:
         db = await get_or_create_member(session, discord_id=user.id, discord_name=user.display_name)
@@ -68,67 +96,93 @@ async def build_member_profile_embed(user: discord.abc.User) -> discord.Embed:
 
     portrait = None
     extra_stats = ""
+    gear_line = ""
     api = AlbionAPIClient()
     try:
-        data = None
+        data: dict[str, Any] | None = None
         if albion_id:
             try:
-                data = await api.get_player(albion_id)
+                got = await api.get_player(albion_id)
+                data = got if isinstance(got, dict) else None
             except AlbionAPIError:
                 data = None
         if data is None and albion_name:
             try:
                 search = await api.search_players(albion_name)
                 players = (search.get("players") if isinstance(search, dict) else None) or []
-                if players:
-                    data = players[0]
-                    pid = data.get("Id")
+                if players and isinstance(players[0], dict):
+                    pid = players[0].get("Id")
                     if pid:
+                        albion_id = str(pid)
                         async with session_scope() as session:
                             db2 = await get_or_create_member(
                                 session, discord_id=user.id, discord_name=user.display_name
                             )
-                            db2.albion_player_id = str(pid)
+                            db2.albion_player_id = albion_id
                         try:
-                            data = await api.get_player(str(pid))
+                            got = await api.get_player(albion_id)
+                            data = got if isinstance(got, dict) else players[0]
                         except AlbionAPIError:
-                            pass
-                        albion_id = str(pid)
+                            data = players[0]
             except AlbionAPIError:
                 data = None
         if isinstance(data, dict):
             albion_name = data.get("Name") or albion_name
             kf = int(data.get("KillFame") or 0)
             df = int(data.get("DeathFame") or 0)
-            extra_stats = f"\n**Kill fame** {kf:,}   ·   **Death fame** {df:,}".replace(",", " ")
+            extra_stats = f"\n**Kill fame** `{kf:,}`   ·   **Death fame** `{df:,}`".replace(",", " ")
             guild_name = data.get("GuildName")
             if guild_name:
                 extra_stats += f"\n**Guilde in-game** {guild_name}"
             if albion_id:
-                portrait = f"https://render.albiononline.com/v1/character/{albion_id}?size=256"
+                try:
+                    kills = await api.get_player_kills(albion_id, limit=1)
+                    deaths = await api.get_player_deaths(albion_id, limit=1)
+                except AlbionAPIError:
+                    kills, deaths = [], []
+                event = None
+                if isinstance(kills, list) and kills:
+                    event = kills[0]
+                    who = "Killer"
+                elif isinstance(deaths, list) and deaths:
+                    event = deaths[0]
+                    who = "Victim"
+                else:
+                    who = "Killer"
+                if isinstance(event, dict):
+                    eq = ((event.get(who) or {}).get("Equipment")) or {}
+                    if isinstance(eq, dict):
+                        portrait = character_render_url(eq)
+                        weapon = _equip_token(eq.get("MainHand") if isinstance(eq.get("MainHand"), dict) else None)
+                        armor = _equip_token(eq.get("Armor") if isinstance(eq.get("Armor"), dict) else None)
+                        bits = [p.split("@")[0].split("?")[0] for p in (weapon, armor) if p]
+                        if bits:
+                            gear_line = " · ".join(bits)
     finally:
         await api.close()
 
     embed = discord.Embed(
         description=(
-            f"-# PROFIL\n"
-            f"## {user.display_name}\n"
+            f"-# PROFIL GUILDE\n"
+            f"# {user.display_name}\n"
             f"{user.mention}\n\n"
             f"**Albion**  {albion_name or '*non renseigné — `/profil_pseudo`*'}\n"
             f"**Rang**  {rank}\n"
             f"**Style**  {gameplay}\n"
-            f"**Onboarding**  règles {'✅' if rules_ok else '❌'}   ·   profil {'✅' if profile_ok else '❌'}"
-            f"{extra_stats}\n\n"
+            f"**Onboarding**  règles {'✅' if rules_ok else '❌'}   ·   fiche {'✅' if profile_ok else '❌'}"
+            f"{extra_stats}\n"
+            f"{('**Stuff récent**  `' + gear_line + '`') if gear_line else ''}\n\n"
             f"## CONTRIBUTION\n"
-            f"💰 Dons  **{format_silver(donated)}**  ·  ce mois **{format_silver(donated_m)}**\n"
-            f"🎯 Points ordres  **{pts}**  ·  ce mois **{pts_m}**\n"
-            f"⚔️ Fame suivie  **{fame:,}**".replace(",", " ")
+            f"💰 **Dons**     {format_silver(donated)}\n"
+            f"📅 **Ce mois**  {format_silver(donated_m)}\n"
+            f"🎯 **Ordres**   {pts} pts  ·  mois {pts_m}\n"
+            f"⚔️ **Fame**     {str(fame).replace(',', ' ') if False else f'{fame:,}'.replace(',', ' ')}"
         ),
         color=discord.Color.gold(),
     )
     if portrait:
-        embed.set_thumbnail(url=portrait)
-    elif getattr(user, "display_avatar", None):
+        embed.set_image(url=portrait)
+    if getattr(user, "display_avatar", None):
         embed.set_thumbnail(url=user.display_avatar.url)
     embed.set_footer(text="Albion PPCF • Fort Sterling")
     return embed
@@ -565,20 +619,36 @@ class Onboarding(commands.Cog):
         rules_ch = find_channel(guild, "rules")
         guide_ch = find_channel(guild, "new_guide")
         posted: list[str] = []
+        errors: list[str] = []
         if rules_ch:
             await rules_ch.send(embed=build_rules_embed(), view=RulesAcceptView())
-            posted.append(rules_ch.mention)
-        if guide_ch:
-            try:
-                await guide_ch.send(embeds=build_guide_embeds())
-                posted.append(guide_ch.mention)
-            except discord.HTTPException:
-                LOGGER.exception("Envoi guide groupé impossible, fallback 1 par 1")
-                for embed in build_guide_embeds():
-                    await guide_ch.send(embed=embed)
-                posted.append(guide_ch.mention)
+            posted.append(f"règles → {rules_ch.mention}")
         else:
-            LOGGER.warning("Salon guide introuvable (cherche un nom avec « guide »)")
+            errors.append("salon **règles** introuvable")
+        if guide_ch is None:
+            category = rules_ch.category if rules_ch else None
+            try:
+                guide_ch = await guild.create_text_channel(
+                    CHANNEL_NAMES["new_guide"],
+                    category=category,
+                    topic="Guide nouveau membre PPCF",
+                    reason="setup_onboarding : salon guide manquant",
+                )
+                posted.append(f"salon créé → {guide_ch.mention}")
+            except discord.HTTPException as exc:
+                errors.append(f"impossible de créer le guide ({exc})")
+        if guide_ch:
+            sent = 0
+            for embed in build_guide_embeds():
+                try:
+                    await guide_ch.send(embed=embed)
+                    sent += 1
+                except discord.HTTPException:
+                    LOGGER.exception("Envoi d'un embed guide échoué")
+            if sent:
+                posted.append(f"guide ({sent} embeds) → {guide_ch.mention}")
+            else:
+                errors.append(f"aucun embed posté dans {guide_ch.mention}")
         arrival = find_channel(guild, "arrival_departure")
         if arrival:
             await arrival.send(
@@ -592,10 +662,10 @@ class Onboarding(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(
-            embed=success_embed("Onboarding posté", "Salons : " + ", ".join(posted)),
-            ephemeral=True,
-        )
+        detail = "\n".join(f"• {line}" for line in posted) or "*rien posté*"
+        if errors:
+            detail += "\n\n⚠️ " + "\n".join(errors)
+        await interaction.followup.send(embed=success_embed("Onboarding", detail), ephemeral=True)
 
     @app_commands.command(name="completer_profil", description="Ouvre le formulaire de profil (même action que le bouton).")
     async def completer_profil(self, interaction: discord.Interaction) -> None:
@@ -605,20 +675,13 @@ class Onboarding(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="profil", description="Affiche ton profil de guilde.")
-    async def profil(self, interaction: discord.Interaction) -> None:
-        async with session_scope() as session:
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            gameplay = GAMEPLAY_CHOICES.get(member.preferred_gameplay or "", member.preferred_gameplay or "—")
-            embed = info_embed(f"Profil — {interaction.user.display_name}")
-            embed.add_field(name="Pseudo Albion", value=member.albion_name or "non renseigné", inline=True)
-            embed.add_field(name="Rang", value=member.current_rank, inline=True)
-            embed.add_field(name="Style", value=gameplay, inline=False)
-            embed.add_field(name="Règles", value="✅" if member.rules_accepted else "❌", inline=True)
-            embed.add_field(name="Profil", value="✅" if member.profile_completed else "❌", inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    @app_commands.command(name="profil", description="Fiche profil (dons, points, portrait Albion équipé).")
+    @app_commands.describe(membre="Laisse vide = toi")
+    async def profil(self, interaction: discord.Interaction, membre: discord.Member | None = None) -> None:
+        await interaction.response.defer(ephemeral=False)
+        target = membre or interaction.user
+        embed = await build_member_profile_embed(target)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="profil_pseudo", description="Met à jour ton pseudo Albion.")
     @app_commands.describe(pseudo="Pseudo in-game (vide pour effacer)")
