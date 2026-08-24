@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
 
 import discord
@@ -35,11 +36,51 @@ def build_quest_embed(quest: Quest) -> discord.Embed:
     return embed
 
 
+class QuestActionItem(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"quest:(?P<action>join|done):(?P<oid>[0-9]+)",
+):
+    def __init__(self, action: str, quest_id: int) -> None:
+        if action == "join":
+            super().__init__(
+                discord.ui.Button(
+                    label="Participer",
+                    emoji="✅",
+                    style=discord.ButtonStyle.success,
+                    custom_id=f"quest:join:{quest_id}",
+                )
+            )
+        else:
+            super().__init__(
+                discord.ui.Button(
+                    label="Terminer",
+                    emoji="✔️",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"quest:done:{quest_id}",
+                )
+            )
+        self.action = action
+        self.quest_id = quest_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+        /,
+    ) -> QuestActionItem:
+        return cls(match["action"], int(match["oid"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await handle_quest_action(interaction, self.action, self.quest_id)
+
+
 class QuestButtons(discord.ui.View):
     def __init__(self, quest_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Participer", emoji="✅", style=discord.ButtonStyle.success, custom_id=f"quest:join:{quest_id}"))
-        self.add_item(discord.ui.Button(label="Terminer", emoji="✔️", style=discord.ButtonStyle.secondary, custom_id=f"quest:done:{quest_id}"))
+        self.add_item(QuestActionItem("join", quest_id))
+        self.add_item(QuestActionItem("done", quest_id))
 
 
 async def _load_quest(session, quest_id: int) -> Quest | None:
@@ -50,6 +91,7 @@ async def _load_quest(session, quest_id: int) -> Quest | None:
             selectinload(Quest.participants).selectinload(QuestParticipant.member),
         )
         .where(Quest.id == quest_id)
+        .execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
 
@@ -68,9 +110,63 @@ async def refresh_quest(bot: commands.Bot, quest: Quest) -> None:
         LOGGER.exception("Maj quête %s impossible", quest.id)
 
 
+async def handle_quest_action(interaction: discord.Interaction, action: str, quest_id: int) -> None:
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+    async with session_scope() as session:
+        quest = await _load_quest(session, quest_id)
+        if quest is None:
+            await interaction.followup.send("Quête introuvable.", ephemeral=True)
+            return
+        member = await get_or_create_member(
+            session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
+        )
+        if action == "join":
+            if quest.status != "active":
+                await interaction.followup.send("Quête déjà terminée.", ephemeral=True)
+                return
+            if any(p.member_id == member.id for p in quest.participants):
+                await interaction.followup.send("Déjà inscrit.", ephemeral=True)
+                return
+            if len(quest.participants) >= 3:
+                await interaction.followup.send("Plus de place (max 3).", ephemeral=True)
+                return
+            session.add(QuestParticipant(quest_id=quest.id, member_id=member.id))
+    if action == "join":
+        async with session_scope() as session:
+            quest = await _load_quest(session, quest_id)
+            assert quest is not None
+            await refresh_quest(interaction.client, quest)
+        await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
+        return
+    async with session_scope() as session:
+        quest = await _load_quest(session, quest_id)
+        assert quest is not None
+        member = await get_or_create_member(
+            session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
+        )
+        if quest.creator_member_id != member.id:
+            await interaction.followup.send("Seul le créateur peut terminer.", ephemeral=True)
+            return
+        quest.status = "completed"
+        quest.completed_at = utcnow()
+        quest.delete_after_at = utcnow() + timedelta(hours=6)
+        await refresh_quest(interaction.client, quest)
+    await interaction.followup.send(
+        embed=success_embed("Quête terminée", "Le message disparaîtra dans 6h."),
+        ephemeral=True,
+    )
+
+
 class Quests(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(QuestActionItem)
+
+    async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(QuestActionItem)
 
     @app_commands.command(name="quete", description="Poste une quête (max 3 participants) dans #tableau-des-quêtes.")
     @app_commands.guild_only()
@@ -110,53 +206,6 @@ class Quests(commands.Cog):
             embed=success_embed("Quête postée", channel.mention),
             ephemeral=True,
         )
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        if interaction.type is not discord.InteractionType.component or not interaction.data:
-            return
-        custom_id = str(interaction.data.get("custom_id") or "")
-        if not custom_id.startswith("quest:"):
-            return
-        _, action, raw = custom_id.split(":")
-        quest_id = int(raw)
-        async with session_scope() as session:
-            quest = await _load_quest(session, quest_id)
-            if quest is None:
-                await interaction.response.send_message("Quête introuvable.", ephemeral=True)
-                return
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            if action == "join":
-                if quest.status != "active":
-                    await interaction.response.send_message("Quête déjà terminée.", ephemeral=True)
-                    return
-                if any(p.member_id == member.id for p in quest.participants):
-                    await interaction.response.send_message("Déjà inscrit.", ephemeral=True)
-                    return
-                if len(quest.participants) >= 3:
-                    await interaction.response.send_message("Plus de place (max 3).", ephemeral=True)
-                    return
-                session.add(QuestParticipant(quest_id=quest.id, member_id=member.id))
-                await session.flush()
-                quest = await _load_quest(session, quest_id)
-                assert quest is not None
-                await refresh_quest(self.bot, quest)
-                await interaction.response.send_message(embed=success_embed("Inscription OK"), ephemeral=True)
-                return
-            if action == "done":
-                if quest.creator_member_id != member.id:
-                    await interaction.response.send_message("Seul le créateur peut terminer.", ephemeral=True)
-                    return
-                quest.status = "completed"
-                quest.completed_at = utcnow()
-                quest.delete_after_at = utcnow() + timedelta(hours=6)
-                await refresh_quest(self.bot, quest)
-                await interaction.response.send_message(
-                    embed=success_embed("Quête terminée", "Le message disparaîtra dans 6h."),
-                    ephemeral=True,
-                )
 
 
 async def setup(bot: commands.Bot) -> None:

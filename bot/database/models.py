@@ -112,6 +112,7 @@ class OrderParticipant(Base, TimestampMixin):
     contribution_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     contribution_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     points_awarded: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    baseline_fame: Mapped[int | None] = mapped_column(Integer)
     accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     order: Mapped[Order] = relationship(back_populates="participants")

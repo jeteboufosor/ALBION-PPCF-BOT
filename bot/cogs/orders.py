@@ -41,8 +41,8 @@ PRIORITY_META = {
 }
 
 OBJECTIVE_TYPES = {
-    "gathering_fame": "Fame gathering (auto plus tard)",
-    "pve_fame": "Fame PvE (auto plus tard)",
+    "gathering_fame": "Fame gathering (auto)",
+    "pve_fame": "Fame PvE (auto)",
     "silver_donated": "Silver donné",
     "item_donated": "Item donné",
     "manual": "Progression manuelle",
@@ -397,7 +397,25 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
             if already:
                 await interaction.followup.send("Tu es déjà inscrit.", ephemeral=True)
                 return
-            session.add(OrderParticipant(order_id=order.id, member_id=member.id))
+            baseline = None
+            if order.objective_type in {"gathering_fame", "pve_fame"}:
+                from bot.services.albion_api import AlbionAPIClient
+                from bot.services.fame import fetch_member_fame
+
+                api = AlbionAPIClient()
+                try:
+                    fame, pid = await fetch_member_fame(
+                        api,
+                        player_id=member.albion_player_id,
+                        name=member.albion_name,
+                        kind=order.objective_type,
+                    )
+                    baseline = fame
+                    if pid and not member.albion_player_id:
+                        member.albion_player_id = pid
+                finally:
+                    await api.close()
+            session.add(OrderParticipant(order_id=order.id, member_id=member.id, baseline_fame=baseline))
 
         async with session_scope() as session:
             order = await _load_order(session, order_id)
@@ -409,7 +427,10 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
             await interaction.message.edit(embed=embed, view=view)
         else:
             await interaction.edit_original_response(embed=embed, view=view)
-        await interaction.followup.send(embed=success_embed("Inscription OK"), ephemeral=True)
+        extra = ""
+        if order.objective_type in {"gathering_fame", "pve_fame"}:
+            extra = " La fame sera suivie automatiquement (il te faut `/profil_pseudo`)."
+        await interaction.followup.send(embed=success_embed("Inscription OK", extra or None), ephemeral=True)
         return
 
     if action in {"complete", "cancel"}:

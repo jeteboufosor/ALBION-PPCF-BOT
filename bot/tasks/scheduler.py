@@ -12,6 +12,7 @@ from bot.tasks.deployment_reminder import run_deployment_reminders
 from bot.tasks.killboard_sync import run_killboard_sync
 from bot.tasks.monthly_reset import run_monthly_reset
 from bot.tasks.order_cleanup import run_order_cleanup
+from bot.tasks.order_fame import run_order_fame_sync
 from bot.tasks.price_watch import run_daily_price_report, run_price_watch
 from bot.tasks.ticket_cleanup import run_ticket_cleanup
 from bot.tasks.weekly_health import run_weekly_health
@@ -52,6 +53,12 @@ def start_scheduler(bot: commands.Bot) -> None:
     async def killboard_job() -> None:
         await run_killboard_sync(bot)
 
+    async def fame_job() -> None:
+        try:
+            await run_order_fame_sync(bot)
+        except Exception:
+            LOGGER.exception("order_fame a échoué")
+
     async def watch_job() -> None:
         try:
             n = await run_price_watch(bot)
@@ -87,6 +94,7 @@ def start_scheduler(bot: commands.Bot) -> None:
     scheduler.add_job(deadline_job, "interval", minutes=1, id="order_deadline", replace_existing=True)
     scheduler.add_job(deploy_job, "interval", minutes=1, id="deploy_reminder", replace_existing=True)
     scheduler.add_job(killboard_job, "interval", minutes=5, id="killboard_sync", replace_existing=True)
+    scheduler.add_job(fame_job, "interval", minutes=5, id="order_fame", replace_existing=True)
     scheduler.add_job(cleanup_job, "interval", minutes=15, id="order_cleanup", replace_existing=True)
     scheduler.add_job(watch_job, "interval", minutes=15, id="price_watch", replace_existing=True)
     scheduler.add_job(ticket_job, "interval", hours=6, id="ticket_cleanup", replace_existing=True)
