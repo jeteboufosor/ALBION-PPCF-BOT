@@ -113,9 +113,13 @@ def build_roles_embed() -> discord.Embed:
             "## 🎭  CHOISIS TES RÔLES\n\n"
             "Clique pour **ajouter** ou **retirer**. "
             "Le **style de jeu** est unique (un seul à la fois).\n\n"
-            "**Style** — PVP · PVE · Gathering · Craft / Économie · Polyvalent\n"
-            "**Classe** — Tank · DPS · Healer · Support\n"
-            "**Pings** — LFG · 🐴 déploiement"
+            "**Style** (1 seul)\n"
+            "⚔️ PVP   ·   🛡️ PVE   ·   ⛏️ Gathering\n"
+            "🔨 Craft / Économie   ·   🎲 Polyvalent\n\n"
+            "**Classe** (cumulables)\n"
+            "🛡️ Tank   ·   ⚔️ DPS   ·   💚 Healer   ·   🌿 Support\n\n"
+            "**Pings**\n"
+            "👥 LFG   ·   🐴 Déploiement"
         ),
         color=discord.Color.purple(),
     )

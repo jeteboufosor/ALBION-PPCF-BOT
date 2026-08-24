@@ -14,7 +14,7 @@ CHANNEL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "history": ("histor",),
     "declaration": ("declar",),
     "rules": ("regle", "rules"),
-    "new_guide": ("guide",),
+    "new_guide": ("guide", "nouveau", "nouveaux"),
     "roles": ("role",),
     "priority_orders": ("ordre-prio", "ordreprio", "prioritaire"),
     "past_orders": ("ordres-pass", "ordrespass"),

@@ -54,7 +54,23 @@ HELP_PAGES: dict[str, tuple[str, str]] = {
         "`/setup` `/setup_onboarding` `/setup_roles` `/setup_leaderboard`\n"
         "`/admin_statut` `/admin_sync` `/save` `/backup_info`\n"
         "`/test_alertes_prix` `/test_cleanup_ordres`\n\n"
-        "Cron : backup 04h · prix 20h · reset 1er · santé lundi 09h.",
+        "Cron : backup 04h · prix 20h · reset 1er · santé lundi 09h.\n"
+        "`TEST_MODE=true` : presque tout est ouvert. En prod : voir page **Droits**.",
+    ),
+    "droits": (
+        "📜 Droits",
+        "**Tout le monde** — `/aide` `/ping` `/profil` (soi ou un autre) "
+        "`/profil_pseudo` `/profil_role` `/completer_profil` `/leaderboard` "
+        "`/prix*` `/watchlist*` `/ordre_info` `/quete`\n\n"
+        "**Officier+** (ou TEST_MODE) — `/setup*` `/deployer` `/deployer_fin` "
+        "`/promotion` (officier : seulement vers Chevalier) `/admin_statut` "
+        "`/test_*`\n\n"
+        "**Seigneur de Guerre / Grand Trésorier** — `/ordre_creer` + boutons Progression/Terminer\n\n"
+        "**Grand Trésorier** — `/tresorerie_*` `/dette_*` `/ressource_*` "
+        "(donateur **obligatoire** sur dépôt et ressource)\n\n"
+        "**Maître de Guilde** — `/retrograder` `/admin_sync` `/save` `/load` `/backup_info`\n\n"
+        "Cible : `/profil membre:` n'importe qui · dépôt/ressource = **donateur** · "
+        "promo/rétro = **membre** choisi.",
     ),
 }
 
