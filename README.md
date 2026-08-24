@@ -11,11 +11,12 @@ DISCORD_TOKEN
 GUILD_ID
 ALBION_GUILD_ID
 DATABASE_URL
-TEST_MODE=true
+TEST_MODE=false
 SYNC_COMMANDS_ON_START=true
+RESET_DATABASE=true
 ```
 
-Passe `TEST_MODE=false` en prod (les `/test_*` et la plupart des setups restent officiers).
+`RESET_DATABASE=true` **une seule fois** au premier deploy de lancement (wipe total). **Supprime la variable juste après** sinon chaque redémarrage vide la base.
 
 **Ne définis pas** `ALBION_API_BASE_URL` / `ALBION_MARKET_BASE_URL` sauf pour forcer autre chose que l’Europe.
 

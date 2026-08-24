@@ -155,16 +155,6 @@ class Treasury(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="setup_tresorerie", description="Poste / rafraîchit le panneau #trésorerie.")
-    @app_commands.guild_only()
-    async def setup_tresorerie(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
-        await interaction.followup.send(embed=success_embed("Panneau trésorerie à jour"), ephemeral=True)
-
     @app_commands.command(name="tresorerie_depot", description="Dépose du silver (crédite le donateur au classement).")
     @app_commands.guild_only()
     @app_commands.describe(montant="Silver déposé", note="Motif", donateur="Qui a donné (obligatoire)")

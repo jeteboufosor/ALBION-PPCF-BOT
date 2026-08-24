@@ -230,18 +230,6 @@ class Market(commands.Cog):
             watch.is_active = False
         await interaction.followup.send(embed=success_embed("Alerte retirée"), ephemeral=True)
 
-    @app_commands.command(name="test_alertes_prix", description="Force une passe d'alertes + aperçu rapport.")
-    async def test_alertes_prix(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        from bot.tasks.price_watch import run_daily_price_report, run_price_watch
-
-        n = await run_price_watch(self.bot)
-        await run_daily_price_report(self.bot)
-        await interaction.followup.send(
-            f"Passe alertes : **{n}** déclenchée(s). Rapport posté dans #alertes-prix si le salon existe.",
-            ephemeral=True,
-        )
-
     @app_commands.command(name="craft_profit", description="Spread Fort Sterling + lien albion.tools.")
     @app_commands.autocomplete(item=item_autocomplete)
     async def craft_profit(self, interaction: discord.Interaction, item: str) -> None:

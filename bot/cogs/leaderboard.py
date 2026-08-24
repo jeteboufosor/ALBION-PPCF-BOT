@@ -6,7 +6,6 @@ import logging
 import re
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
@@ -231,46 +230,6 @@ class Leaderboard(commands.Cog):
         msg = await channel.send(embed=embed, view=view)
         self._message_id = msg.id
         return channel
-
-    @app_commands.command(name="leaderboard", description="Affiche le classement (1 embed, boutons de nav).")
-    @app_commands.choices(
-        categorie=[
-            app_commands.Choice(name="ordres", value="ordres"),
-            app_commands.Choice(name="fame", value="fame"),
-            app_commands.Choice(name="dons", value="dons"),
-        ],
-        periode=[
-            app_commands.Choice(name="mensuel", value="month"),
-            app_commands.Choice(name="all-time", value="all"),
-        ],
-    )
-    async def leaderboard_cmd(
-        self,
-        interaction: discord.Interaction,
-        categorie: app_commands.Choice[str] | None = None,
-        periode: app_commands.Choice[str] | None = None,
-    ) -> None:
-        await interaction.response.defer()
-        cat = categorie.value if categorie else "ordres"
-        period = periode.value if periode else "month"
-        embed = await build_leaderboard_embed(cat, period)
-        await interaction.followup.send(embed=embed, view=LeaderboardView(cat, period))
-
-    @app_commands.command(name="setup_leaderboard", description="Poste le classement unique dans #leaderboard.")
-    @app_commands.guild_only()
-    async def setup_leaderboard(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        assert interaction.guild
-        try:
-            channel = await self.post_or_update(interaction.guild)
-        except Exception as exc:
-            LOGGER.exception("setup_leaderboard a échoué")
-            await interaction.followup.send(f"Impossible de poster le classement : {exc}", ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"Classement posté dans {channel.mention} (1 embed + boutons).",
-            ephemeral=True,
-        )
 
 
 async def setup(bot: commands.Bot) -> None:

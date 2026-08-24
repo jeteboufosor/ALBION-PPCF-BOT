@@ -94,15 +94,18 @@ async def _add_missing_order_columns(conn) -> None:
 
 
 async def init_db() -> None:
-    """Crée les tables manquantes.
+    """Crée les tables. Si RESET_DATABASE=true : drop total puis recréation vide."""
 
-    Suffisant pour le développement local. En production, on pourra ajouter Alembic
-    quand le schéma sera stabilisé.
-    """
+    import logging
 
+    logger = logging.getLogger(__name__)
     async with engine.begin() as conn:
+        if settings.reset_database:
+            logger.warning("RESET_DATABASE=true — suppression de TOUTES les tables")
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        await _add_missing_order_columns(conn)
+        if not settings.reset_database:
+            await _add_missing_order_columns(conn)
 
 
 async def dispose_engine() -> None:

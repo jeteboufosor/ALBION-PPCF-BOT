@@ -147,43 +147,6 @@ class Roles(commands.Cog):
     async def cog_load(self) -> None:
         self.bot.add_view(ClassRolesView())
 
-    @app_commands.command(name="setup_roles", description="Poste le panneau de rôles dans #rôles (crée les rôles manquants).")
-    @app_commands.guild_only()
-    async def setup_roles(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_setup(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        assert guild is not None
-        created = await ensure_toggle_roles(guild)
-        channel = find_channel(guild, "roles")
-        if channel is None:
-            await interaction.followup.send(
-                embed=error_embed("Salon introuvable", "Impossible de trouver #rôles."),
-                ephemeral=True,
-            )
-            return
-        await channel.send(embed=build_roles_embed(), view=ClassRolesView())
-        extra = f"\nRôles créés : {', '.join(created)}" if created else ""
-        await interaction.followup.send(
-            embed=success_embed("Panneau rôles posté", channel.mention + extra),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="test_roles", description="[TEST] Affiche tes rôles de classe en base.")
-    async def test_roles(self, interaction: discord.Interaction) -> None:
-        async with session_scope() as session:
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            state = member.class_roles or {}
-        lines = [f"• {ROLE_NAMES[k]} : {'✅' if state.get(k) else '❌'}" for k in CLASS_ROLE_KEYS]
-        await interaction.response.send_message(
-            embed=info_embed("Rôles enregistrés", "\n".join(lines) or "aucun"),
-            ephemeral=True,
-        )
-
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Roles(bot))

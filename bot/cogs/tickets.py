@@ -380,32 +380,6 @@ class Tickets(commands.Cog):
     async def cog_unload(self) -> None:
         self.bot.remove_dynamic_items(TicketActionItem)
 
-    @app_commands.command(name="setup_declaration", description="Poste le panneau de déclaration dans #declaration.")
-    @app_commands.guild_only()
-    async def setup_declaration(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.user, discord.Member) or not (settings.test_mode or is_officer(interaction.user)):
-            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
-            return
-        channel = find_channel(interaction.guild, "declaration")  # type: ignore[arg-type]
-        if channel is None:
-            await interaction.followup.send(embed=error_embed("Salon #declaration introuvable"), ephemeral=True)
-            return
-        embed = discord.Embed(
-            description=(
-                "## ✉️  DÉCLARATIONS\n\n"
-                "**💰 Don** — silver ou items pour le coffre\n"
-                "**🎯 Ordre prio** — contribution à un ordre existant\n"
-                "**🔨 Craft / stuff** — demander ressources ou équipement\n"
-                "**⚠️ Problème** — signaler un souci (staff uniquement)\n"
-                "**💬 Autre** — tout le reste\n\n"
-                "Un salon privé s'ouvre. Le Grand Trésorier est prévenu pour don / ordre / craft."
-            ),
-            color=discord.Color.orange(),
-        )
-        await channel.send(embed=embed, view=DeclarationView())
-        await interaction.followup.send(embed=success_embed("Panneau posté", channel.mention), ephemeral=True)
-
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type is not discord.InteractionType.component or not interaction.data:

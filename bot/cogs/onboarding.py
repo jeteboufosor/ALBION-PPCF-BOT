@@ -177,7 +177,7 @@ async def build_member_profile_embed(user: discord.abc.User) -> discord.Embed:
             f"-# PROFIL GUILDE\n"
             f"# {user.display_name}\n"
             f"{user.mention}\n\n"
-            f"**Albion**  {albion_name or '*non renseigné — `/profil_pseudo`*'}\n"
+            f"**Albion**  {albion_name or '*non renseigné — complète ton profil*'}\n"
             f"**Rang**  {rank}\n"
             f"**Style**  {gameplay}\n"
             f"**Onboarding**  règles {'✅' if rules_ok else '❌'}   ·   fiche {'✅' if profile_ok else '❌'}"
@@ -412,8 +412,7 @@ async def maybe_validate_member(
                 (
                     "Ton profil est validé. Commandes utiles :\n"
                     "• `/profil` — voir ton profil\n"
-                    "• `/profil_pseudo` — mettre à jour ton pseudo Albion\n"
-                    "• `/profil_role` — mettre à jour ton style de jeu\n"
+                    "• **Compléter mon profil** pour le pseudo Albion et le style\n"
                     "Ensuite, passe dans #rôles pour tes classes (Tank / DPS / Healer / Support)."
                 ),
             )
@@ -467,7 +466,7 @@ def build_guide_embeds() -> list[discord.Embed]:
             "## 🎯  ORDRES PRIORITAIRES\n\n"
             "Missions de guilde numérotées (#001…) dans #🎯 ordre-prioritaire.\n"
             "• Clique **Accepter** pour t'inscrire.\n"
-            "• **Auto** : fame PvE / gathering (`/profil_pseudo`) et silver déposé en banque.\n"
+            "• **Auto** : fame PvE / gathering (pseudo dans le formulaire) et silver déposé en banque.\n"
             "• **Tout le reste se déclare** — surtout les **items**. "
             "Sans ticket, ça ne compte pas. Ticket **🎯 Ordre prio** dans #✉️ declaration "
             "(quoi, combien, n° d'ordre).\n"
@@ -623,66 +622,6 @@ class Onboarding(commands.Cog):
             embed.set_thumbnail(url=member.display_avatar.url)
         await arrival.send(embed=embed)
 
-    @app_commands.command(name="setup_onboarding", description="Poste les embeds #règles et #guide-nouveau.")
-    @app_commands.guild_only()
-    async def setup_onboarding(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_use_test_commands(interaction.user):
-            await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        assert guild is not None
-        rules_ch = find_channel(guild, "rules")
-        guide_ch = find_channel(guild, "new_guide")
-        posted: list[str] = []
-        errors: list[str] = []
-        if rules_ch:
-            await rules_ch.send(embed=build_rules_embed(), view=RulesAcceptView())
-            posted.append(f"règles → {rules_ch.mention}")
-        else:
-            errors.append("salon **règles** introuvable")
-        if guide_ch is None:
-            category = rules_ch.category if rules_ch else None
-            try:
-                guide_ch = await guild.create_text_channel(
-                    CHANNEL_NAMES["new_guide"],
-                    category=category,
-                    topic="Guide nouveau membre PPCF",
-                    reason="setup_onboarding : salon guide manquant",
-                )
-                posted.append(f"salon créé → {guide_ch.mention}")
-            except discord.HTTPException as exc:
-                errors.append(f"impossible de créer le guide ({exc})")
-        if guide_ch:
-            sent = 0
-            for embed in build_guide_embeds():
-                try:
-                    await guide_ch.send(embed=embed)
-                    sent += 1
-                except discord.HTTPException:
-                    LOGGER.exception("Envoi d'un embed guide échoué")
-            if sent:
-                posted.append(f"guide ({sent} embeds) → {guide_ch.mention}")
-            else:
-                errors.append(f"aucun embed posté dans {guide_ch.mention}")
-        arrival = find_channel(guild, "arrival_departure")
-        if arrival:
-            await arrival.send(
-                embed=build_welcome_embed(interaction.user),
-                view=ProfileOpenView(),
-            )
-            posted.append(arrival.mention)
-        if not posted:
-            await interaction.followup.send(
-                embed=error_embed("Salons introuvables", f"Attendu : {CHANNEL_NAMES['rules']} et {CHANNEL_NAMES['new_guide']}"),
-                ephemeral=True,
-            )
-            return
-        detail = "\n".join(f"• {line}" for line in posted) or "*rien posté*"
-        if errors:
-            detail += "\n\n⚠️ " + "\n".join(errors)
-        await interaction.followup.send(embed=success_embed("Onboarding", detail), ephemeral=True)
-
     @app_commands.command(name="completer_profil", description="Ouvre le formulaire de profil (même action que le bouton).")
     async def completer_profil(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
@@ -698,114 +637,6 @@ class Onboarding(commands.Cog):
         target = membre or interaction.user
         embed = await build_member_profile_embed(target)
         await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="profil_pseudo", description="Met à jour ton pseudo Albion.")
-    @app_commands.describe(pseudo="Pseudo in-game (vide pour effacer)")
-    async def profil_pseudo(self, interaction: discord.Interaction, pseudo: str | None = None) -> None:
-        async with session_scope() as session:
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            member.albion_name = (pseudo or "").strip() or None
-            member.albion_player_id = None
-        await interaction.response.send_message(
-            embed=success_embed("Pseudo mis à jour", pseudo or "effacé"),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="profil_role", description="Met à jour ton style de gameplay.")
-    @app_commands.describe(style="pvp, pve, gathering, craft ou polyvalent")
-    @app_commands.choices(
-        style=[
-            app_commands.Choice(name=label, value=key) for key, label in GAMEPLAY_CHOICES.items()
-        ]
-    )
-    async def profil_role(self, interaction: discord.Interaction, style: app_commands.Choice[str]) -> None:
-        async with session_scope() as session:
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            member.preferred_gameplay = style.value
-            member.profile_completed = True
-        if isinstance(interaction.user, discord.Member) and interaction.guild:
-            await apply_playstyle_role(interaction.guild, interaction.user, style.value)
-        await interaction.response.send_message(
-            embed=success_embed("Style mis à jour", GAMEPLAY_CHOICES[style.value]),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="test_welcome", description="[TEST] Simule ton arrivée (bienvenue + Non vérifié).")
-    @app_commands.guild_only()
-    async def test_welcome(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_use_test_commands(interaction.user):
-            await interaction.response.send_message("Mode test désactivé ou permission insuffisante.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        await self._process_join(interaction.user)
-        await interaction.followup.send(embed=success_embed("Simulation OK", "Message de bienvenue posté."), ephemeral=True)
-
-    @app_commands.command(name="test_reset_profil", description="[TEST] Remet ton onboarding à zéro.")
-    @app_commands.guild_only()
-    async def test_reset_profil(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_use_test_commands(interaction.user):
-            await interaction.response.send_message("Mode test désactivé ou permission insuffisante.", ephemeral=True)
-            return
-        member = interaction.user
-        async with session_scope() as session:
-            db_member = await get_or_create_member(
-                session, discord_id=member.id, discord_name=member.display_name
-            )
-            db_member.rules_accepted = False
-            db_member.profile_completed = False
-            db_member.current_rank = "unverified"
-            db_member.preferred_gameplay = None
-        recruit = find_role(member.guild, "recruit")
-        unverified = find_role(member.guild, "unverified")
-        try:
-            if recruit and recruit in member.roles:
-                await member.remove_roles(recruit, reason="Reset test onboarding")
-            if unverified and unverified not in member.roles:
-                await member.add_roles(unverified, reason="Reset test onboarding")
-        except discord.HTTPException:
-            LOGGER.exception("Reset rôles impossible")
-        await interaction.response.send_message(
-            embed=warning_embed("Profil reset", "Tu es de nouveau Non vérifié. Refais règles + formulaire."),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="test_validation", description="[TEST] Force la validation Recrue sur toi.")
-    @app_commands.guild_only()
-    async def test_validation(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not _can_use_test_commands(interaction.user):
-            await interaction.response.send_message("Mode test désactivé ou permission insuffisante.", ephemeral=True)
-            return
-        async with session_scope() as session:
-            db_member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            db_member.rules_accepted = True
-            db_member.profile_completed = True
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-        await maybe_validate_member(interaction, rules_ok=True, profile_ok=True)
-        await interaction.followup.send(embed=success_embed("Forcé Recrue"), ephemeral=True)
-
-    @app_commands.command(name="test_statut", description="[TEST] Affiche le mode test et tes flags onboarding.")
-    async def test_statut(self, interaction: discord.Interaction) -> None:
-        async with session_scope() as session:
-            member = await get_or_create_member(
-                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
-            )
-            embed = info_embed(
-                "Statut test",
-                (
-                    f"TEST_MODE : **{settings.test_mode}**\n"
-                    f"Règles : **{member.rules_accepted}**\n"
-                    f"Profil : **{member.profile_completed}**\n"
-                    f"Rang DB : **{member.current_rank}**"
-                ),
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

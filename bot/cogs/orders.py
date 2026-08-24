@@ -14,7 +14,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from bot.config import settings
-from bot.tasks.order_cleanup import run_order_cleanup
 from bot.database.crud import get_or_create_member, next_order_number
 from bot.database.engine import session_scope
 from bot.database.models import ContributionScore, Order, OrderParticipant, utcnow
@@ -510,7 +509,7 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
             await interaction.edit_original_response(embed=embed, view=view)
         extra = ""
         if order.objective_type in {"gathering_fame", "pve_fame"}:
-            extra = " La fame sera suivie automatiquement (il te faut `/profil_pseudo`)."
+            extra = " La fame sera suivie automatiquement (pseudo Albion dans le formulaire)."
         await interaction.followup.send(embed=success_embed("Inscription OK", extra or None), ephemeral=True)
         return
 
@@ -670,20 +669,6 @@ class Orders(commands.Cog):
             await interaction.response.send_message(embed=error_embed("Ordre introuvable"), ephemeral=True)
             return
         await interaction.response.send_message(embed=build_order_embed(order), ephemeral=True)
-
-    @app_commands.command(name="test_cleanup_ordres", description="[TEST] Force archivage + clôture auto des ordres.")
-    @app_commands.guild_only()
-    async def test_cleanup_ordres(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.user, discord.Member) or not _can_manage(interaction.user):
-            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
-            return
-        closed = await expire_overdue_orders(self.bot)
-        archived, quests = await run_order_cleanup(self.bot)
-        await interaction.followup.send(
-            f"Clôturés : **{closed}** · archivés : **{archived}** · quêtes retirées : **{quests}**",
-            ephemeral=True,
-        )
 
 
 async def setup(bot: commands.Bot) -> None:
