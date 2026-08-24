@@ -86,19 +86,21 @@ class ProfileModal(discord.ui.Modal, title="Profil de guilde"):
     """Formulaire d'arrivée."""
 
     albion_name = discord.ui.TextInput(
-        label="Pseudo Albion in-game",
+        label="Pseudo Albion",
         placeholder="Laisse vide si tu n'as pas encore le jeu",
         required=False,
         max_length=120,
     )
     gameplay = discord.ui.TextInput(
-        label="Style de jeu (pvp / pve / gathering / craft / polyvalent)",
-        placeholder="Ex: pvp  ou  polyvalent",
+        label="Style : pvp / pve / gathering / craft",
+        placeholder="pvp, pve, gathering, craft ou polyvalent",
         required=True,
         max_length=40,
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         raw = str(self.gameplay).strip().lower()
         key = next((k for k in GAMEPLAY_CHOICES if k in raw or raw in GAMEPLAY_CHOICES[k].lower()), None)
         aliases = {
@@ -116,7 +118,7 @@ class ProfileModal(discord.ui.Modal, title="Profil de guilde"):
         if key is None:
             key = aliases.get(raw)
         if key is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=error_embed(
                     "Style inconnu",
                     "Utilise l'un de : `pvp`, `pve`, `gathering`, `craft`, `polyvalent`.",
@@ -138,16 +140,17 @@ class ProfileModal(discord.ui.Modal, title="Profil de guilde"):
             db_member.profile_completed = True
             rules_ok = db_member.rules_accepted
 
-        await maybe_validate_member(interaction, rules_ok=rules_ok, profile_ok=True)
-        if not interaction.response.is_done():
-            extra = "" if rules_ok else "\nIl te reste à accepter les règles dans #règles."
-            await interaction.response.send_message(
-                embed=success_embed(
-                    "Profil enregistré",
-                    f"Style : **{GAMEPLAY_CHOICES[key]}**\nPseudo Albion : **{albion or 'non renseigné'}**{extra}",
-                ),
-                ephemeral=True,
-            )
+        validated = await maybe_validate_member(interaction, rules_ok=rules_ok, profile_ok=True)
+        extra = "" if rules_ok else "\nIl te reste à accepter les règles dans #règles."
+        if validated:
+            extra = "\nTu es maintenant **Recrue**. Bienvenue !"
+        await interaction.followup.send(
+            embed=success_embed(
+                "Profil enregistré",
+                f"Style : **{GAMEPLAY_CHOICES[key]}**\nPseudo Albion : **{albion or 'non renseigné'}**{extra}",
+            ),
+            ephemeral=True,
+        )
 
 
 async def handle_accept_rules(interaction: discord.Interaction) -> None:
@@ -161,13 +164,16 @@ async def handle_accept_rules(interaction: discord.Interaction) -> None:
         db_member.rules_accepted = True
         profile_ok = db_member.profile_completed
 
-    await maybe_validate_member(interaction, rules_ok=True, profile_ok=profile_ok)
     if not interaction.response.is_done():
-        extra = "" if profile_ok else "\nComplète encore ton profil via **Compléter mon profil**."
-        await interaction.response.send_message(
-            embed=success_embed("Règles acceptées", f"Merci !{extra}"),
-            ephemeral=True,
-        )
+        await interaction.response.defer(ephemeral=True)
+    validated = await maybe_validate_member(interaction, rules_ok=True, profile_ok=profile_ok)
+    extra = "" if profile_ok else "\nComplète encore ton profil via **Compléter mon profil**."
+    if validated:
+        extra = "\nTu es maintenant **Recrue**. Bienvenue !"
+    await interaction.followup.send(
+        embed=success_embed("Règles acceptées", f"Merci !{extra}"),
+        ephemeral=True,
+    )
 
 
 async def maybe_validate_member(
@@ -175,21 +181,21 @@ async def maybe_validate_member(
     *,
     rules_ok: bool,
     profile_ok: bool,
-) -> None:
+) -> bool:
     """Passe Non vérifié → Recrue si les 2 étapes sont faites."""
 
     if not (rules_ok and profile_ok):
-        return
+        return False
     guild = interaction.guild
     member = interaction.user
     if guild is None or not isinstance(member, discord.Member):
         if interaction.guild_id:
             guild = interaction.client.get_guild(interaction.guild_id)
         if guild is None:
-            return
+            return False
         fetched = guild.get_member(member.id)
         if fetched is None:
-            return
+            return False
         member = fetched
 
     unverified = find_role(guild, "unverified")
@@ -234,12 +240,7 @@ async def maybe_validate_member(
         )
     except discord.Forbidden:
         pass
-
-    if not interaction.response.is_done():
-        await interaction.response.send_message(
-            embed=success_embed("Validation terminée", "Tu es maintenant **Recrue**. Bienvenue !"),
-            ephemeral=True,
-        )
+    return True
 
 
 def build_rules_embed() -> discord.Embed:
@@ -398,6 +399,7 @@ class Onboarding(commands.Cog):
         if not isinstance(interaction.user, discord.Member) or not _can_use_test_commands(interaction.user):
             await interaction.response.send_message("Permission insuffisante.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         assert guild is not None
         rules_ch = find_channel(guild, "rules")
@@ -409,13 +411,20 @@ class Onboarding(commands.Cog):
         if guide_ch:
             await guide_ch.send(embed=build_guide_embed())
             posted.append(guide_ch.mention)
+        arrival = find_channel(guild, "arrival_departure")
+        if arrival:
+            await arrival.send(
+                embed=build_welcome_embed(interaction.user),
+                view=ProfileOpenView(),
+            )
+            posted.append(arrival.mention)
         if not posted:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=error_embed("Salons introuvables", f"Attendu : {CHANNEL_NAMES['rules']} et {CHANNEL_NAMES['new_guide']}"),
                 ephemeral=True,
             )
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=success_embed("Onboarding posté", "Salons : " + ", ".join(posted)),
             ephemeral=True,
         )
@@ -522,9 +531,10 @@ class Onboarding(commands.Cog):
             )
             db_member.rules_accepted = True
             db_member.profile_completed = True
-        await maybe_validate_member(interaction, rules_ok=True, profile_ok=True)
         if not interaction.response.is_done():
-            await interaction.response.send_message(embed=success_embed("Forcé Recrue"), ephemeral=True)
+            await interaction.response.defer(ephemeral=True)
+        await maybe_validate_member(interaction, rules_ok=True, profile_ok=True)
+        await interaction.followup.send(embed=success_embed("Forcé Recrue"), ephemeral=True)
 
     @app_commands.command(name="test_statut", description="[TEST] Affiche le mode test et tes flags onboarding.")
     async def test_statut(self, interaction: discord.Interaction) -> None:

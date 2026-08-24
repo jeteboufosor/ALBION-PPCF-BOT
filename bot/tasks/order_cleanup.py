@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from bot.database.engine import session_scope
 from bot.database.models import Order, OrderParticipant, Quest, QuestParticipant, utcnow
-from bot.utils.embeds import format_order_number, info_embed
+from bot.utils.embeds import format_order_number
 from bot.utils.permissions import find_channel
 
 LOGGER = logging.getLogger(__name__)
@@ -89,16 +89,27 @@ async def _archive_order(bot: commands.Bot, order: Order) -> None:
     if guild is not None:
         archive = find_channel(guild, "past_orders")
         if archive is not None:
-            people = sorted(order.participants, key=lambda p: p.contribution_amount, reverse=True)
-            lines = [f"{p.member.discord_name if p.member else '?'} — {p.contribution_amount} ({p.points_awarded} pts)" for p in people]
-            embed = info_embed(
-                f"📜 Archive {format_order_number(order.order_number)} — {order.title}",
-                order.description,
+            from bot.cogs.orders import build_order_embed
+            from bot.utils.embeds import discord_timestamp
+
+            embed = build_order_embed(order)
+            status_fr = {"completed": "✅ Réussi", "expired": "💀 Échoué", "cancelled": "❌ Annulé"}.get(
+                order.status, order.status
             )
-            status_fr = {"completed": "réussi", "expired": "échoué", "cancelled": "annulé"}.get(order.status, order.status)
-            embed.add_field(name="Statut", value=status_fr, inline=True)
-            embed.add_field(name="Total", value=f"{order.current_amount}/{order.target_amount}", inline=True)
-            embed.add_field(name="Classement", value="\n".join(lines) or "aucun", inline=False)
+            when = order.completed_at or order.cancelled_at
+            extra = [
+                f"**Archive** {format_order_number(order.order_number)}",
+                f"**Issue :** {status_fr}",
+            ]
+            if order.close_reason:
+                extra.append(f"**Motif :** `{order.close_reason}`")
+            if when:
+                extra.append(f"**Clôturé :** {discord_timestamp(when, 'F')} — {discord_timestamp(when, 'R')}")
+            extra.append(f"**Quota :** {order.current_amount:,} / {order.target_amount:,}".replace(",", " "))
+            if order.points_value:
+                extra.append(f"**Points / contributeur :** +{order.points_value}" if order.status == "completed" else "**Points :** 0 (échec / annulation)")
+            embed.description = (embed.description or "") + "\n\n" + "\n".join(extra)
+            embed.title = f"📜 Archive {format_order_number(order.order_number)}"
             await archive.send(embed=embed)
 
     async with session_scope() as session:

@@ -7,8 +7,6 @@ commandes, la synchronisation ne publie rien sur Discord.
 
 from __future__ import annotations
 
-import re
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -73,39 +71,27 @@ def build_help_embed(page: str = "membre") -> discord.Embed:
     return embed
 
 
-class HelpNavItem(
-    discord.ui.DynamicItem[discord.ui.Button],
-    template=r"help:(?P<page>membre|ordres|banque|sortie|staff)",
-):
+class HelpButton(discord.ui.Button["HelpView"]):
     def __init__(self, page: str, current: str) -> None:
-        label = HELP_PAGES[page][0].split(" ", 1)[-1]
-        emoji = HELP_PAGES[page][0].split(" ", 1)[0]
+        title = HELP_PAGES[page][0]
+        emoji, label = title.split(" ", 1)
         super().__init__(
-            discord.ui.Button(
-                label=label,
-                emoji=emoji,
-                style=discord.ButtonStyle.primary if page == current else discord.ButtonStyle.secondary,
-                disabled=page == current,
-                custom_id=f"help:{page}",
-            )
+            label=label,
+            emoji=emoji,
+            style=discord.ButtonStyle.primary if page == current else discord.ButtonStyle.secondary,
+            custom_id=f"help:{page}",
         )
         self.page = page
 
-    @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /) -> HelpNavItem:
-        return cls(match["page"], match["page"])
-
     async def callback(self, interaction: discord.Interaction) -> None:
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-        await interaction.message.edit(embed=build_help_embed(self.page), view=HelpView(self.page))
+        await interaction.response.edit_message(embed=build_help_embed(self.page), view=HelpView(self.page))
 
 
 class HelpView(discord.ui.View):
     def __init__(self, current: str = "membre") -> None:
         super().__init__(timeout=None)
         for key in HELP_PAGES:
-            self.add_item(HelpNavItem(key, current))
+            self.add_item(HelpButton(key, current))
 
 
 class General(commands.Cog):
@@ -115,10 +101,7 @@ class General(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        self.bot.add_dynamic_items(HelpNavItem)
-
-    async def cog_unload(self) -> None:
-        self.bot.remove_dynamic_items(HelpNavItem)
+        self.bot.add_view(HelpView())
 
     @app_commands.command(name="aide", description="Guide des commandes (boutons de catégories).")
     async def aide(self, interaction: discord.Interaction) -> None:
