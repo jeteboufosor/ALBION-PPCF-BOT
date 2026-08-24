@@ -342,7 +342,10 @@ async def complete_order(
         await refresh_order_message(bot, order)
 
     # DMs hors transaction
-    lines = [f"Ordre {format_order_number(snapshot['number'])} **{snapshot['title']}** terminé."]
+    won = bool(snapshot.get("success"))
+    lines = [f"Ordre {format_order_number(snapshot['number'])} **{snapshot['title']}** {'réussi' if won else 'échoué'}."]
+    if not won:
+        lines.append("Objectif non atteint — aucun point attribué.")
     medals = ["🥇", "🥈", "🥉"]
     for idx, (_did, name, amt) in enumerate(snapshot["people"]):
         medal = medals[idx] if idx < 3 else "•"
@@ -367,10 +370,43 @@ async def complete_order(
             continue
         try:
             extra = f"\n🎁 Récompense : {reward_txt}" if reward_txt else ""
-            await user.send(embed=info_embed("Ordre terminé", recap + extra))
+            title = "Ordre réussi" if snapshot.get("success") else "Ordre échoué"
+            await user.send(embed=info_embed(title, recap + extra))
         except discord.HTTPException:
             pass
     return order
+
+
+async def expire_overdue_orders(bot: commands.Bot) -> int:
+    """Clôture auto : quota atteint = réussi, délai dépassé = échoué."""
+
+    now = utcnow()
+    async with session_scope() as session:
+        due = list(
+            (await session.execute(select(Order.id).where(Order.status == "active", Order.deadline_at <= now))).scalars().all()
+        )
+        full = list(
+            (
+                await session.execute(
+                    select(Order.id).where(Order.status == "active", Order.current_amount >= Order.target_amount)
+                )
+            ).scalars().all()
+        )
+    closed = 0
+    seen: set[int] = set()
+    for oid in full:
+        if oid in seen:
+            continue
+        seen.add(oid)
+        if await complete_order(bot, oid, reason="quota"):
+            closed += 1
+    for oid in due:
+        if oid in seen:
+            continue
+        seen.add(oid)
+        if await complete_order(bot, oid, reason="deadline"):
+            closed += 1
+    return closed
 
 
 async def handle_order_action(interaction: discord.Interaction, action: str, order_id: int) -> None:
