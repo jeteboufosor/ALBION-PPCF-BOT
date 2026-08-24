@@ -17,6 +17,30 @@ SYNC_COMMANDS_ON_START=true
 
 Passe `TEST_MODE=false` en prod (les `/test_*` et la plupart des setups restent officiers).
 
+**Ne définis pas** `ALBION_API_BASE_URL` / `ALBION_MARKET_BASE_URL` sauf pour forcer autre chose que l’Europe.
+
+## API Albion — Europe uniquement
+
+| Usage | URL |
+|---|---|
+| Gameinfo (joueurs, fame, kills, guilde) | `https://gameinfo-ams.albiononline.com/api/gameinfo` |
+| Recherche joueur | `…/search?q=PSEUDO` |
+| Joueur | `…/players/{id}` |
+| Stats fame | `…/players/{id}/statistics` |
+| Kills / morts | `…/players/{id}/kills` · `…/deaths` |
+| Membres de guilde | `…/guilds/{ALBION_GUILD_ID}/members` |
+| Killboard events | `…/events?limit=50` |
+| Marché (prix / histo) | `https://europe.albion-online-data.com/api/v2/stats` |
+| Prix | `…/prices/{ITEM_ID}?locations=Fort Sterling` |
+| Historique | `…/history/{ITEM_ID}?locations=Fort Sterling&time-scale=24` |
+| Icônes items | `https://render.albiononline.com/v1/item/{ITEM_ID}.png` |
+| Portrait équipé | `https://render.albiononline.com/v1/character/{slots}.png?size=512` |
+| Catalogue items FR | `https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/items.json` |
+| Craft (lien) | `https://albion.tools/crafting?item={ITEM_ID}` |
+
+Amérique (à **ne pas** utiliser) : `gameinfo.albiononline.com` · `west.albion-online-data.com`  
+Asie : `gameinfo-sgp.albiononline.com` · `east.albion-online-data.com`
+
 ## Après chaque deploy
 
 1. `/admin_sync`
