@@ -191,6 +191,49 @@ class Treasury(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="taxe", description="Collecte une taxe (ajoute à la trésorerie sans affecter le classement).")
+    @app_commands.guild_only()
+    @app_commands.describe(montant="Silver collecté en taxe", note="Motif de la taxe", source="Joueur taxé (optionnel)")
+    async def taxe(
+        self,
+        interaction: discord.Interaction,
+        montant: int,
+        note: str,
+        source: discord.Member | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not isinstance(interaction.user, discord.Member) or not _can_tresorerie(interaction.user):
+            await interaction.followup.send("Grand Trésorier uniquement (ou mode test).", ephemeral=True)
+            return
+        if montant <= 0:
+            await interaction.followup.send(embed=error_embed("Montant invalide"), ephemeral=True)
+            return
+        async with session_scope() as session:
+            state = await get_treasury_state(session)
+            state.current_balance += montant
+            state.total_deposited += montant
+            source_name = source.display_name if source else "Source non spécifiée"
+            session.add(
+                TreasuryTransaction(
+                    transaction_type="deposit",
+                    amount=montant,
+                    balance_after=state.current_balance,
+                    note=f"TAXE: {note} | source={source_name}",
+                    author_discord_id=interaction.user.id,
+                )
+            )
+        await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        source_text = f" de {source.mention}" if source else ""
+        await log_history(
+            interaction.guild,  # type: ignore[arg-type]
+            "🏛️ Taxe collectée",
+            f"**{format_silver(montant)}** collectés{source_text}\n{note}",
+        )
+        await interaction.followup.send(
+            embed=success_embed("Taxe enregistrée", f"{format_silver(montant)}{source_text}"),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="tresorerie_retrait", description="Retire du silver de la trésorerie.")
     @app_commands.guild_only()
     async def tresorerie_retrait(self, interaction: discord.Interaction, montant: int, note: str) -> None:
