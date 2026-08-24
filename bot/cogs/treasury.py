@@ -191,7 +191,7 @@ class Treasury(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="taxe", description="Collecte les taxes hebdomadaires (ajoute à la trésorerie, sans affecter le classement).")
+    @app_commands.command(name="taxe", description="Collecte les taxes hebdomadaires (ajoute à la trésorerie et avance les ordres « Silver donné », sans affecter le classement).")
     @app_commands.guild_only()
     @app_commands.describe(montant="Total de silver collecté en taxes cette semaine")
     async def taxe(
@@ -219,14 +219,27 @@ class Treasury(commands.Cog):
                     author_discord_id=interaction.user.id,
                 )
             )
+        # Connexion aux ordres prioritaires : la taxe collective avance la progression
+        # des ordres « silver_donated » actifs, sans créditer un membre au classement.
+        from bot.cogs.orders import credit_collective_silver
+
+        credited, closed = await credit_collective_silver(self.bot, amount=montant)
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
+        order_note = ""
+        if credited:
+            order_note = f"\n🏅 Progression créditée sur **{credited}** ordre(s) prioritaire(s)."
+        if closed:
+            order_note += f"\n✅ {len(closed)} ordre(s) atteint(s) et clôturé(s) automatiquement."
         await log_history(
             interaction.guild,  # type: ignore[arg-type]
             "🏛️ Taxe hebdomadaire collectée",
-            f"**{format_silver(montant)}** ajoutés à la trésorerie\nEffort collectif — non crédité au classement",
+            f"**{format_silver(montant)}** ajoutés à la trésorerie\nEffort collectif — non crédité au classement{order_note}",
         )
         await interaction.followup.send(
-            embed=success_embed("Taxe enregistrée", f"{format_silver(montant)} ajoutés au coffre"),
+            embed=success_embed(
+                "Taxe enregistrée",
+                f"{format_silver(montant)} ajoutés au coffre{order_note}",
+            ),
             ephemeral=True,
         )
 

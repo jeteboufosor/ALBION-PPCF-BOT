@@ -130,6 +130,9 @@ def build_order_embed(order: Order) -> discord.Embed:
 
     item_line = f"\n**Item :** {order.objective_item_name}" if order.objective_item_name else ""
     bar = progress_bar(order.current_amount, order.target_amount, width=32)
+    collective_line = ""
+    if (order.collective_amount or 0) > 0:
+        collective_line = f"\n-# dont {order.collective_amount:,} taxe collective"
     rule = "━" * 26
     description = (
         f"-# ORDRE PRIORITAIRE  ·  {format_order_number(order.order_number)}\n"
@@ -140,6 +143,7 @@ def build_order_embed(order: Order) -> discord.Embed:
         f"## OBJECTIF  —  {percent}%\n"
         f"`{bar}`\n"
         f"# {order.current_amount:,}  /  {order.target_amount:,}"
+        f"{collective_line}"
         f"{close_line}"
     )
 
@@ -248,7 +252,7 @@ class ProgressModal(discord.ui.Modal, title="Ajouter une progression"):
                 )
                 return
             target.contribution_amount += qty
-            order.current_amount = sum(p.contribution_amount for p in order.participants)
+            _sync_current_amount(order)
             total = order.current_amount or 1
             for part in order.participants:
                 part.contribution_percent = part.contribution_amount * 100 / total
@@ -382,6 +386,16 @@ def _item_key(name: str) -> str:
     return "".join(ch.lower() for ch in name if ch.isalnum())
 
 
+def _sync_current_amount(order: Order) -> None:
+    """Recalcule current_amount = contributions des participants + montant collectif (taxe).
+
+    Le montant collectif (ordre atteint grâce à la taxe collective) ne doit pas être
+    écrasé par les recalculs basés uniquement sur les participants.
+    """
+
+    order.current_amount = sum(p.contribution_amount for p in order.participants) + (order.collective_amount or 0)
+
+
 async def credit_order_contribution(
     bot: commands.Bot,
     *,
@@ -409,7 +423,7 @@ async def credit_order_contribution(
             if part is None:
                 continue
             part.contribution_amount += amount
-            order.current_amount = sum(p.contribution_amount for p in order.participants)
+            _sync_current_amount(order)
             total = order.current_amount or 1
             for p in order.participants:
                 p.contribution_percent = p.contribution_amount * 100 / total
@@ -419,6 +433,39 @@ async def credit_order_contribution(
     for oid in closed:
         await complete_order(bot, oid, reason="quota")
     return closed
+
+
+async def credit_collective_silver(bot: commands.Bot, *, amount: int) -> tuple[int, list[int]]:
+    """Crédite un montant collectif (ex: /taxe) vers tous les ordres « silver_donated » actifs.
+
+    Le montant avance la progression de l'ordre (et peut le clôturer) mais n'est
+    rattaché à aucun membre : aucun point de classement, aucune GuildDonation.
+
+    Retourne (nombre d'ordres crédités, ids des ordres clôturés).
+    """
+
+    closed: list[int] = []
+    credited: list[int] = []
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Order)
+            .options(selectinload(Order.participants).selectinload(OrderParticipant.member))
+            .where(Order.status == "active", Order.objective_type == "silver_donated")
+        )
+        orders = list(result.scalars().all())
+        for order in orders:
+            order.collective_amount = (order.collective_amount or 0) + amount
+            _sync_current_amount(order)
+            total = order.current_amount or 1
+            for p in order.participants:
+                p.contribution_percent = p.contribution_amount * 100 / total
+            await refresh_order_message(bot, order)
+            credited.append(order.id)
+            if order.current_amount >= order.target_amount:
+                closed.append(order.id)
+    for oid in closed:
+        await complete_order(bot, oid, reason="quota")
+    return len(credited), closed
 
 
 async def expire_overdue_orders(bot: commands.Bot) -> int:

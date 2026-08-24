@@ -18,7 +18,7 @@ FAME_TYPES = ("gathering_fame", "pve_fame")
 
 
 async def run_order_fame_sync(bot: commands.Bot) -> int:
-    from bot.cogs.orders import complete_order, refresh_order_message
+    from bot.cogs.orders import _sync_current_amount, complete_order, refresh_order_message
 
     api = AlbionAPIClient()
     updated = 0
@@ -56,7 +56,7 @@ async def run_order_fame_sync(bot: commands.Bot) -> int:
                         changed = True
                 if not changed:
                     continue
-                order.current_amount = sum(p.contribution_amount for p in order.participants)
+                _sync_current_amount(order)
                 total = order.current_amount or 1
                 for part in order.participants:
                     part.contribution_percent = part.contribution_amount * 100 / total

@@ -78,6 +78,7 @@ class Order(Base, TimestampMixin):
     objective_item_name: Mapped[str | None] = mapped_column(String(160))
     target_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     current_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    collective_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", index=True, nullable=False)
     reward_type: Mapped[str] = mapped_column(String(40), nullable=False)
