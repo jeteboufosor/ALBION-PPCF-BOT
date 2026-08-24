@@ -185,6 +185,11 @@ class Treasury(commands.Cog):
         donor = donateur
         async with session_scope() as session:
             await _credit_silver(session, donor=donor, amount=montant, note=note, author_id=interaction.user.id)
+        from bot.cogs.orders import credit_order_contribution
+
+        await credit_order_contribution(
+            self.bot, discord_id=donor.id, kind="silver_donated", amount=montant
+        )
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
             interaction.guild,  # type: ignore[arg-type]
@@ -350,6 +355,15 @@ class Treasury(commands.Cog):
                 req.fulfilled_at = utcnow()
             item_label = req.item_name
         donor = donateur
+        from bot.cogs.orders import credit_order_contribution
+
+        await credit_order_contribution(
+            self.bot,
+            discord_id=donor.id,
+            kind="item_donated",
+            amount=quantite,
+            item_name=item_label,
+        )
         await refresh_treasury_panel(self.bot, interaction.guild)  # type: ignore[arg-type]
         await log_history(
             interaction.guild,  # type: ignore[arg-type]

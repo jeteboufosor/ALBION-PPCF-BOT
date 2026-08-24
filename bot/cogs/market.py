@@ -242,11 +242,33 @@ class Market(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="craft_profit", description="Rentabilité craft (lien albion.tools).")
+    @app_commands.command(name="craft_profit", description="Spread Fort Sterling + lien albion.tools.")
     @app_commands.autocomplete(item=item_autocomplete)
     async def craft_profit(self, interaction: discord.Interaction, item: str) -> None:
+        await interaction.response.defer(ephemeral=False)
+        item = await self._resolve(item)
         url = f"https://albion.tools/crafting?item={item}"
-        await interaction.response.send_message(embed=info_embed("🔨 Craft profit", f"[Ouvrir sur albion.tools]({url})"))
+        try:
+            rows = await self.api.get_prices(item, locations=FORT_STERLING)
+        except MarketAPIError as exc:
+            await interaction.followup.send(embed=error_embed("API marché", str(exc)))
+            return
+        row = rows[0] if rows else {}
+        sell = int(row.get("sell_price_min") or 0)
+        buy = int(row.get("buy_price_max") or 0)
+        spread = sell - buy if sell and buy else 0
+        embed = info_embed(
+            f"🔨 {item}",
+            f"**Fort Sterling**\n"
+            f"Vente min : **{_fmt_price(sell)}**\n"
+            f"Achat max : **{_fmt_price(buy)}**\n"
+            f"Spread : **{_fmt_price(spread)}**\n\n"
+            f"[Recette / taxes sur albion.tools]({url})",
+        )
+        icon = await self._icon(item)
+        if icon:
+            embed.set_thumbnail(url=icon)
+        await interaction.followup.send(embed=embed)
 
 
 async def setup(bot: commands.Bot) -> None:

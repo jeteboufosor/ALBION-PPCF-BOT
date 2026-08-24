@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -79,23 +80,48 @@ async def notify_treasurers(guild: discord.Guild, embed: discord.Embed, view: di
     LOGGER.info("DM ticket envoyé à %s Grand Trésorier(s)", sent)
 
 
+class TicketActionItem(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"ticket:(?P<action>close|approve|deny):(?P<oid>[0-9]+)",
+):
+    def __init__(self, action: str, ticket_id: int) -> None:
+        meta = {
+            "close": ("Fermer", "🔒", discord.ButtonStyle.danger),
+            "approve": ("Approuver", "✅", discord.ButtonStyle.success),
+            "deny": ("Refuser", "❌", discord.ButtonStyle.danger),
+        }
+        label, emoji, style = meta[action]
+        super().__init__(
+            discord.ui.Button(label=label, emoji=emoji, style=style, custom_id=f"ticket:{action}:{ticket_id}")
+        )
+        self.action = action
+        self.ticket_id = ticket_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+        /,
+    ) -> TicketActionItem:
+        return cls(match["action"], int(match["oid"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await handle_ticket_button(interaction, self.action, str(self.ticket_id))
+
+
 class TicketCloseView(discord.ui.View):
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(
-            discord.ui.Button(label="Fermer", emoji="🔒", style=discord.ButtonStyle.danger, custom_id=f"ticket:close:{ticket_id}")
-        )
+        self.add_item(TicketActionItem("close", ticket_id))
 
 
 class DonationReviewView(discord.ui.View):
     def __init__(self, ticket_id: int) -> None:
         super().__init__(timeout=None)
-        self.add_item(
-            discord.ui.Button(label="Approuver", emoji="✅", style=discord.ButtonStyle.success, custom_id=f"ticket:approve:{ticket_id}")
-        )
-        self.add_item(
-            discord.ui.Button(label="Refuser", emoji="❌", style=discord.ButtonStyle.danger, custom_id=f"ticket:deny:{ticket_id}")
-        )
+        self.add_item(TicketActionItem("approve", ticket_id))
+        self.add_item(TicketActionItem("deny", ticket_id))
 
 
 class DeclarationView(discord.ui.View):
@@ -247,9 +273,7 @@ async def create_ticket(interaction: discord.Interaction, ticket_type: str, titl
     )
     embed.add_field(name="Auteur", value=user.mention, inline=True)
     embed.add_field(name="Sujet", value=title, inline=True)
-    close_view = TicketCloseView(ticket_id)
-    await channel.send(content=user.mention, embed=embed, view=close_view)
-    close_view.stop()
+    await channel.send(content=user.mention, embed=embed, view=TicketCloseView(ticket_id))
 
     if ticket_type in NOTIFY_TYPES:
         await notify_treasurers(
@@ -351,6 +375,10 @@ class Tickets(commands.Cog):
 
     async def cog_load(self) -> None:
         self.bot.add_view(DeclarationView())
+        self.bot.add_dynamic_items(TicketActionItem)
+
+    async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(TicketActionItem)
 
     @app_commands.command(name="setup_declaration", description="Poste le panneau de déclaration dans #declaration.")
     @app_commands.guild_only()

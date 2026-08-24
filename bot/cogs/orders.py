@@ -355,6 +355,8 @@ async def complete_order(
         reward_txt = ""
         rtype = snapshot["reward_type"]
         rew = snapshot["rewards"]
+        if not won:
+            rtype = ""
         if rtype == "winner" and idx == 0:
             reward_txt = rew["winner"] or ""
         elif rtype in {"podium", "mixed"} and idx == 0:
@@ -375,6 +377,49 @@ async def complete_order(
         except discord.HTTPException:
             pass
     return order
+
+
+def _item_key(name: str) -> str:
+    return "".join(ch.lower() for ch in name if ch.isalnum())
+
+
+async def credit_order_contribution(
+    bot: commands.Bot,
+    *,
+    discord_id: int,
+    kind: str,
+    amount: int,
+    item_name: str | None = None,
+) -> list[int]:
+    """Ajoute une contribution aux ordres actifs du bon type (si le membre a accepté)."""
+
+    closed: list[int] = []
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Order)
+            .options(selectinload(Order.participants).selectinload(OrderParticipant.member))
+            .where(Order.status == "active", Order.objective_type == kind)
+        )
+        orders = list(result.scalars().all())
+        for order in orders:
+            if kind == "item_donated" and item_name:
+                target = order.objective_item_name or order.title
+                if _item_key(item_name) not in _item_key(target) and _item_key(target) not in _item_key(item_name):
+                    continue
+            part = next((p for p in order.participants if p.member and p.member.discord_id == discord_id), None)
+            if part is None:
+                continue
+            part.contribution_amount += amount
+            order.current_amount = sum(p.contribution_amount for p in order.participants)
+            total = order.current_amount or 1
+            for p in order.participants:
+                p.contribution_percent = p.contribution_amount * 100 / total
+            await refresh_order_message(bot, order)
+            if order.current_amount >= order.target_amount:
+                closed.append(order.id)
+    for oid in closed:
+        await complete_order(bot, oid, reason="quota")
+    return closed
 
 
 async def expire_overdue_orders(bot: commands.Bot) -> int:
