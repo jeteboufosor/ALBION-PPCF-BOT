@@ -501,7 +501,7 @@ def build_guide_embeds() -> list[discord.Embed]:
             "**Tout don se déclare** avec un ticket **💰 Don** dans #✉️ declaration. "
             "Le Grand Trésorier est prévenu en DM.\n"
             "Historique : #📜 historique.\n"
-            "Demandes de stuff : ticket **Craft** ou `/ressource_ajouter` (trésorier).\n\n"
+            "Besoin de stuff : ticket **Craft** dans #✉️ declaration.\n\n"
             "On ne « balance » pas du silver en jeu sans ticket : la banque se base sur **ta déclaration**."
         ),
         color=color,
