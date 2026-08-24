@@ -70,8 +70,9 @@ Auto : fame PvE / gathering (API), silver (dépôt), item (apport ressource).
 Quota → réussi + points. Délai dépassé → échoué, 0 point.
 
 ### Banque
-`/tresorerie_depot` `/tresorerie_retrait` `/dette_*` `/ressource_*`  
-Donateur **obligatoire** sur dépôt et ressource.
+`/tresorerie_depot` `/tresorerie_retrait` `/dette_*` `/ressource_*` `/taxe`  
+Donateur **obligatoire** sur dépôt et ressource.  
+`/taxe` (collecte hebdo collective) crédite la progression des ordres « Silver donné » actifs, sans affecter le classement.
 
 ### Sorties
 `/deployer` `/deployer_fin` — rappels **DM uniquement** à T-10.  
