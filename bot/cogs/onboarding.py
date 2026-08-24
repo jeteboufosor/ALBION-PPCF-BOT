@@ -71,62 +71,57 @@ class ProfileOpenView(discord.ui.View):
         custom_id=PROFILE_CUSTOM_ID,
     )
     async def open_profile(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
-        try:
-            await interaction.response.send_modal(ProfileModal())
-        except discord.HTTPException:
-            LOGGER.exception("Impossible d'ouvrir le modal profil")
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    "Le formulaire n'a pas pu s'ouvrir. Utilise `/completer_profil`.",
-                    ephemeral=True,
-                )
+        await interaction.response.send_message(
+            embed=info_embed("Profil de guilde", "Choisis ton style de jeu :"),
+            view=GameplaySelectView(),
+            ephemeral=True,
+        )
 
 
-class ProfileModal(discord.ui.Modal, title="Profil de guilde"):
-    """Formulaire d'arrivée."""
+class GameplaySelect(discord.ui.Select["GameplaySelectView"]):
+    def __init__(self) -> None:
+        options = [
+            discord.SelectOption(label="Combattre d'autres joueurs (PvP)", value="pvp", emoji="⚔️"),
+            discord.SelectOption(label="Affronter des monstres / Donjons (PvE)", value="pve", emoji="🛡️"),
+            discord.SelectOption(label="Récolter des ressources (Gathering)", value="gathering", emoji="⛏️"),
+            discord.SelectOption(label="Fabriquer et vendre (Craft / Économie)", value="craft", emoji="🔨"),
+            discord.SelectOption(label="Je veux un peu de tout (Polyvalent)", value="polyvalent", emoji="🎲"),
+        ]
+        super().__init__(
+            placeholder="Choisis un style…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="onboarding:gameplay_select",
+        )
 
+    async def callback(self, interaction: discord.Interaction) -> None:
+        key = self.values[0]
+        await interaction.response.send_modal(AlbionNameModal(key))
+
+
+class GameplaySelectView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+        self.add_item(GameplaySelect())
+
+
+class AlbionNameModal(discord.ui.Modal, title="Pseudo Albion"):
     albion_name = discord.ui.TextInput(
         label="Pseudo Albion",
         placeholder="Laisse vide si tu n'as pas encore le jeu",
         required=False,
         max_length=120,
     )
-    gameplay = discord.ui.TextInput(
-        label="Style : pvp / pve / gathering / craft",
-        placeholder="pvp, pve, gathering, craft ou polyvalent",
-        required=True,
-        max_length=40,
-    )
+
+    def __init__(self, gameplay: str) -> None:
+        super().__init__()
+        self.gameplay = gameplay
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
-        raw = str(self.gameplay).strip().lower()
-        key = next((k for k in GAMEPLAY_CHOICES if k in raw or raw in GAMEPLAY_CHOICES[k].lower()), None)
-        aliases = {
-            "combat": "pvp",
-            "joueur": "pvp",
-            "donjon": "pve",
-            "monstre": "pve",
-            "recolte": "gathering",
-            "récolte": "gathering",
-            "farm": "gathering",
-            "eco": "craft",
-            "économie": "craft",
-            "tout": "polyvalent",
-        }
-        if key is None:
-            key = aliases.get(raw)
-        if key is None:
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Style inconnu",
-                    "Utilise l'un de : `pvp`, `pve`, `gathering`, `craft`, `polyvalent`.",
-                ),
-                ephemeral=True,
-            )
-            return
-
+        key = self.gameplay if self.gameplay in GAMEPLAY_CHOICES else "polyvalent"
         member = interaction.user
         async with session_scope() as session:
             db_member = await get_or_create_member(
@@ -324,6 +319,7 @@ class Onboarding(commands.Cog):
     async def cog_load(self) -> None:
         self.bot.add_view(RulesAcceptView())
         self.bot.add_view(ProfileOpenView())
+        self.bot.add_view(GameplaySelectView())
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
