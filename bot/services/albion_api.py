@@ -15,7 +15,7 @@ class AlbionAPIError(RuntimeError):
 
 
 class AlbionAPIClient:
-    """Client léger gameinfo.albiononline.com."""
+    """Client léger gameinfo-ams (serveur Europe)."""
 
     def __init__(self, base_url: str | None = None, *, timeout: float = 15.0) -> None:
         self.base_url = (base_url or settings.albion_api_base_url).rstrip("/")

@@ -48,12 +48,12 @@ class Settings:
 
     albion_api_base_url: str = field(
         default_factory=lambda: os.getenv(
-            "ALBION_API_BASE_URL", "https://gameinfo.albiononline.com/api/gameinfo"
+            "ALBION_API_BASE_URL", "https://gameinfo-ams.albiononline.com/api/gameinfo"
         )
     )
     albion_market_base_url: str = field(
         default_factory=lambda: os.getenv(
-            "ALBION_MARKET_BASE_URL", "https://www.albion-online-data.com/api/v2/stats"
+            "ALBION_MARKET_BASE_URL", "https://europe.albion-online-data.com/api/v2/stats"
         )
     )
     albion_tools_base_url: str = field(default_factory=lambda: os.getenv("ALBION_TOOLS_BASE_URL", "https://albion.tools"))

@@ -131,6 +131,17 @@ async def build_member_profile_embed(user: discord.abc.User) -> discord.Embed:
             kf = int(data.get("KillFame") or 0)
             df = int(data.get("DeathFame") or 0)
             extra_stats = f"\n**Kill fame** `{kf:,}`   ·   **Death fame** `{df:,}`".replace(",", " ")
+            stats = data.get("LifetimeStatistics") if isinstance(data.get("LifetimeStatistics"), dict) else {}
+            pve = int(((stats.get("PvE") or {}) if isinstance(stats.get("PvE"), dict) else {}).get("Total") or 0)
+            gath = stats.get("Gathering") if isinstance(stats.get("Gathering"), dict) else {}
+            gath_all = gath.get("All") if isinstance(gath.get("All"), dict) else gath
+            gathering = int((gath_all or {}).get("Total") or 0) if isinstance(gath_all, dict) else 0
+            craft_s = stats.get("Crafting") if isinstance(stats.get("Crafting"), dict) else {}
+            crafting = int((craft_s or {}).get("Total") or 0)
+            if pve or gathering or crafting:
+                extra_stats += (
+                    f"\n**PvE** `{pve:,}`  ·  **Gathering** `{gathering:,}`  ·  **Craft** `{crafting:,}`"
+                ).replace(",", " ")
             guild_name = data.get("GuildName")
             if guild_name:
                 extra_stats += f"\n**Guilde in-game** {guild_name}"
@@ -426,7 +437,8 @@ def build_rules_embed() -> discord.Embed:
             "on avance selon l'activité et la parole donnée, pas selon le copinage.\n"
             "• Participe aux déploiements quand tu peux.\n"
             "• Ne divulgue pas les infos internes (sorties, coffre, tickets).\n"
-            "• Signale un problème via le ticket **Problème**.\n\n"
+            "• Signale un problème via le ticket **Problème**.\n"
+            "• **Pas de furry** : aucun contenu / RP / avatar furry autorisé sur le serveur.\n\n"
             "Clique **J'accepte les règles** une fois que c'est lu."
         ),
         color=discord.Color.orange(),
