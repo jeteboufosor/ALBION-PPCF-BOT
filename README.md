@@ -1,64 +1,70 @@
-# Albion PPCF Bot Discord
+# Albion PPCF Bot
 
-Bot Discord async pour une guilde Albion Online (Fort Sterling).
+Bot Discord (Python / discord.py / SQLAlchemy async) pour la guilde **PPCF** — Fort Sterling.
 
-**Phase 2 — Onboarding + rôles** (Phase 1 déjà en place).
+Déploiement : Railway + PostgreSQL. Processus : `python -m bot.main`.
 
-## Railway
+## Variables Railway
 
-Variables déjà prévues :
-
-```env
-DISCORD_TOKEN=...
-GUILD_ID=...
-ALBION_GUILD_ID=...
-DATABASE_URL=...          # PostgreSQL Railway
-TEST_MODE=true            # laisse true le temps des tests
+```
+DISCORD_TOKEN
+GUILD_ID
+ALBION_GUILD_ID
+DATABASE_URL
+TEST_MODE=true
 SYNC_COMMANDS_ON_START=true
 ```
 
-Passe `TEST_MODE=false` en production pour restreindre les commandes `/test_*` et les setups aux officiers.
+Passe `TEST_MODE=false` en prod (les `/test_*` et la plupart des setups restent officiers).
 
-## Commandes slash à tester
+## Après chaque deploy
 
-Après redéploiement, tape `/` dans Discord. Si rien n’apparaît, redémarre le worker Railway (sync au boot).
+1. `/admin_sync`
+2. Une fois : `/setup` puis les `/setup_*` (onboarding, rôles, trésorerie, déclaration, leaderboard)
+3. Chaque membre : `/profil_pseudo` (killboard + fame auto)
 
-### Diagnostic
-- `/ping` — latence
-- `/setup` — rôles / salons manquants
-- `/test_statut` — flags onboarding + TEST_MODE
+Les dates se saisissent en timestamp Discord : `<t:1787511600:R>`.
 
-### Setup des panneaux (une fois)
-- `/setup_onboarding` — poste règles + guide + bouton ✅
-- `/setup_roles` — poste les 6 boutons de classes dans #rôles
+Salon banque réel : `#💰 trésorie`. Rôle sorties : `🐴 déploiement`.
 
-### Onboarding
-- `/test_welcome` — simule ton arrivée (rôle Non vérifié + embed + bouton)
-- `/test_reset_profil` — remet règles/profil à zéro
-- `/test_validation` — force Recrue
-- `/profil` `/profil_pseudo` `/profil_role`
+## Commandes
 
-### Rôles
-- Clique les boutons du panneau #rôles (toggle)
-- `/test_roles` — état enregistré en base
+Tape `/aide` en jeu (boutons Membre / Ordres / Banque / Sorties / Staff).
 
-## Phase 3 — Ordres + quêtes
+### Membre
+`/profil` `/profil_pseudo` `/profil_role` `/completer_profil` `/leaderboard`
 
-- `/ordre_creer` — titre, description, priorité, objectif, type, deadline `JJ/MM/AAAA HH:MM`, récompenses
-- `/ordre_info numero:` — fiche d'un ordre
-- `/quete` — mini-ordre max 3 dans #tableau-des-quêtes
-- `/test_cleanup_ordres` — force l'archivage (24h / 6h)
+### Marché (réponses publiques, watchlist privée)
+`/prix` `/prix_comparer` `/black_market` `/historique_prix` `/craft_profit`  
+`/watchlist` `/watchlist_ajouter` `/watchlist_supprimer`
 
-Boutons ordre : Accepter / Progression (gestionnaires) / Terminer / Annuler.  
-En `TEST_MODE=true` tout le monde peut créer/terminer.
+### Ordres & quêtes
+`/ordre_creer` `/ordre_info` `/quete`
 
-## Parcours de test recommandé
+Auto : fame PvE / gathering (API), silver (dépôt), item (apport ressource).  
+Quota → réussi + points. Délai dépassé → échoué, 0 point.
 
-1. `/setup` → corrige les noms de rôles/salons s’ils sont listés manquants
-2. `/setup_onboarding` puis `/setup_roles`
-3. `/test_reset_profil`
-4. Accepte les règles + complète le profil (ou `/test_welcome` puis le formulaire)
-5. Vérifie #arrivé-départ et le passage **Non vérifié → Recrue**
-6. Toggle Tank / DPS / etc. puis `/test_roles`
+### Banque
+`/tresorerie_depot` `/tresorerie_retrait` `/dette_*` `/ressource_*`  
+Donateur **obligatoire** sur dépôt et ressource.
 
-Le bot doit pouvoir **gérer les rôles** (rôle bot au-dessus de Recrue / Non vérifié / classes).
+### Sorties
+`/deployer` `/deployer_fin` — rappels **DM uniquement** à T-10.  
+`/promotion` `/retrograder`
+
+### Staff
+`/setup` `/setup_onboarding` `/setup_roles` `/setup_tresorerie` `/setup_declaration` `/setup_leaderboard`  
+`/admin_statut` `/admin_sync` `/save` `/backup_info`  
+`/test_alertes_prix` `/test_cleanup_ordres`
+
+## Cron (Europe/Berlin)
+
+| Quand | Quoi |
+|---|---|
+| 1 min | deadlines ordres, rappels déploiement |
+| 5 min | killboard, fame ordres |
+| 15 min | archive, watchlist prix |
+| 04h00 | backup `#backup-sql` |
+| 20h00 | rapport `#alertes-prix` |
+| 1er 00h05 | reset scores mensuels |
+| lundi 09h | santé `#alertes-bot` |

@@ -71,6 +71,7 @@ async def _add_missing_order_columns(conn) -> None:
         "ALTER TABLE contribution_scores ADD COLUMN IF NOT EXISTS fame_monthly INTEGER DEFAULT 0",
         "ALTER TABLE contribution_scores ADD COLUMN IF NOT EXISTS fame_baseline INTEGER DEFAULT 0",
         "ALTER TABLE order_participants ADD COLUMN IF NOT EXISTS baseline_fame INTEGER",
+        "ALTER TABLE treasury_state ADD COLUMN IF NOT EXISTS leaderboard_message_id BIGINT",
     )
     if IS_SQLITE:
         statements = (
@@ -83,6 +84,7 @@ async def _add_missing_order_columns(conn) -> None:
             "ALTER TABLE contribution_scores ADD COLUMN fame_monthly INTEGER DEFAULT 0",
             "ALTER TABLE contribution_scores ADD COLUMN fame_baseline INTEGER DEFAULT 0",
             "ALTER TABLE order_participants ADD COLUMN baseline_fame INTEGER",
+            "ALTER TABLE treasury_state ADD COLUMN leaderboard_message_id BIGINT",
         )
     for stmt in statements:
         try:

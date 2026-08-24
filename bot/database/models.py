@@ -216,6 +216,7 @@ class TreasuryState(Base, TimestampMixin):
     total_deposited: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_withdrawn: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     treasury_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    leaderboard_message_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Debt(Base, TimestampMixin):

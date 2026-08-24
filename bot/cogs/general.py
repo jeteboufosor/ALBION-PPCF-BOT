@@ -7,11 +7,105 @@ commandes, la synchronisation ne publie rien sur Discord.
 
 from __future__ import annotations
 
+import re
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from bot.config import CHANNEL_NAMES, ROLE_NAMES, settings
+
+HELP_PAGES: dict[str, tuple[str, str]] = {
+    "membre": (
+        "👤 Membre",
+        "**Profil**\n"
+        "`/profil` `/profil_pseudo` `/profil_role` `/completer_profil`\n"
+        "`/aide` — ce menu\n\n"
+        "**Marché** (public)\n"
+        "`/prix` `/prix_comparer` `/black_market` `/historique_prix` `/craft_profit`\n"
+        "`/watchlist` `/watchlist_ajouter` `/watchlist_supprimer`\n\n"
+        "**Classement**\n"
+        "`/leaderboard` — 1 embed, boutons catégorie + ⏳ période",
+    ),
+    "ordres": (
+        "🎯 Ordres",
+        "`/ordre_creer` — deadline en `<t:unix:R>`\n"
+        "`/ordre_info`\n"
+        "`/quete` — max 3 dans #tableau-des-quêtes\n\n"
+        "Types auto : fame PvE / gathering (besoin `/profil_pseudo`), "
+        "silver (dépôt trésorerie), item (apport ressource).\n"
+        "Quota → **réussi** + points. Délai dépassé → **échoué**, 0 point.",
+    ),
+    "banque": (
+        "💰 Banque",
+        "`/setup_tresorerie` `/tresorerie_depot` `/tresorerie_retrait`\n"
+        "`/dette_ajouter` `/dette_rembourser`\n"
+        "`/ressource_ajouter` `/ressource_supprimer`\n"
+        "`/setup_declaration` — Don / Ordre / Craft / Problème / Autre\n\n"
+        "Salon réel : `#💰 trésorie`. Donateur **obligatoire** sur dépôt et ressource.",
+    ),
+    "sortie": (
+        "🐴 Sorties",
+        "`/deployer` — heure `<t:unix:R>`, places optionnelles\n"
+        "`/deployer_fin`\n"
+        "`/promotion` `/retrograder`\n\n"
+        "Rappels **DM uniquement** (yes/maybe) à T-10 min.",
+    ),
+    "staff": (
+        "🛠️ Staff",
+        "`/setup` `/setup_onboarding` `/setup_roles` `/setup_leaderboard`\n"
+        "`/admin_statut` `/admin_sync` `/save` `/backup_info`\n"
+        "`/test_alertes_prix` `/test_cleanup_ordres`\n\n"
+        "Cron : backup 04h · prix 20h · reset 1er · santé lundi 09h.",
+    ),
+}
+
+
+def build_help_embed(page: str = "membre") -> discord.Embed:
+    if page not in HELP_PAGES:
+        page = "membre"
+    title, body = HELP_PAGES[page]
+    embed = discord.Embed(
+        description=f"-# AIDE PPCF\n## {title}\n\n{body}",
+        color=discord.Color.orange(),
+    )
+    embed.set_footer(text="Albion PPCF • Fort Sterling")
+    return embed
+
+
+class HelpNavItem(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"help:(?P<page>membre|ordres|banque|sortie|staff)",
+):
+    def __init__(self, page: str, current: str) -> None:
+        label = HELP_PAGES[page][0].split(" ", 1)[-1]
+        emoji = HELP_PAGES[page][0].split(" ", 1)[0]
+        super().__init__(
+            discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=discord.ButtonStyle.primary if page == current else discord.ButtonStyle.secondary,
+                disabled=page == current,
+                custom_id=f"help:{page}",
+            )
+        )
+        self.page = page
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /) -> HelpNavItem:
+        return cls(match["page"], match["page"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await interaction.message.edit(embed=build_help_embed(self.page), view=HelpView(self.page))
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, current: str = "membre") -> None:
+        super().__init__(timeout=None)
+        for key in HELP_PAGES:
+            self.add_item(HelpNavItem(key, current))
 
 
 class General(commands.Cog):
@@ -19,6 +113,16 @@ class General(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(HelpNavItem)
+
+    async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(HelpNavItem)
+
+    @app_commands.command(name="aide", description="Guide des commandes (boutons de catégories).")
+    async def aide(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(embed=build_help_embed("membre"), view=HelpView("membre"), ephemeral=True)
 
     @app_commands.command(name="ping", description="Vérifie que le bot répond et affiche sa latence.")
     async def ping(self, interaction: discord.Interaction) -> None:

@@ -671,5 +671,20 @@ class Orders(commands.Cog):
             return
         await interaction.response.send_message(embed=build_order_embed(order), ephemeral=True)
 
+    @app_commands.command(name="test_cleanup_ordres", description="[TEST] Force archivage + clôture auto des ordres.")
+    @app_commands.guild_only()
+    async def test_cleanup_ordres(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not isinstance(interaction.user, discord.Member) or not _can_manage(interaction.user):
+            await interaction.followup.send("Permission insuffisante.", ephemeral=True)
+            return
+        closed = await expire_overdue_orders(self.bot)
+        archived, quests = await run_order_cleanup(self.bot)
+        await interaction.followup.send(
+            f"Clôturés : **{closed}** · archivés : **{archived}** · quêtes retirées : **{quests}**",
+            ephemeral=True,
+        )
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Orders(bot))
