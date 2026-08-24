@@ -17,7 +17,7 @@ En `TEST_MODE=true` (Railway par défaut), presque tout est ouvert. En prod (`fa
 | `/quete` | tout le monde | — |
 | `/ordre_creer` | SdG / Grand Trésorier | — |
 | `/tresorerie_depot` | Grand Trésorier | **donateur** obligatoire |
-| `/taxe` | Grand Trésorier | montant + note, **source** optionnelle — ajoute à la trésorerie sans affecter le classement |
+| `/taxe` | Grand Trésorier | montant uniquement — collecte hebdo, effort collectif, pas de classement |
 | `/tresorerie_retrait` | Grand Trésorier | — |
 | `/dette_ajouter` | Grand Trésorier | **membre** |
 | `/dette_rembourser` | Grand Trésorier | id dette |
