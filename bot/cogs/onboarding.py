@@ -438,7 +438,8 @@ def build_rules_embed() -> discord.Embed:
             "• Participe aux déploiements quand tu peux.\n"
             "• Ne divulgue pas les infos internes (sorties, coffre, tickets).\n"
             "• Signale un problème via le ticket **Problème**.\n"
-            "• **Pas de furry** : aucun contenu / RP / avatar furry autorisé sur le serveur.\n\n"
+            "• **Pas de furry** : aucun contenu, RP, avatar, pseudo, image ou blague "
+            "relié au furry. C'est **interdit**, ça met toute la guilde mal à l'aise.\n\n"
             "Clique **J'accepte les règles** une fois que c'est lu."
         ),
         color=discord.Color.orange(),
