@@ -74,7 +74,7 @@ settings = Settings()
 # Noms canoniques des rôles Discord.
 ROLE_NAMES: Final[dict[str, str]] = {
     "guild_master": "🟠 Maître de Guilde",
-    "war_lord": "🟡 Seigneur de Guerre",
+    "war_lord": "🟡 Maître de Guerre",
     "grand_treasurer": "🔴 Grand Trésorier",
     "officer": "🟢 Officier",
     "knight": "🟣 Chevalier",

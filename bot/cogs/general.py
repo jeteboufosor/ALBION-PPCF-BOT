@@ -55,7 +55,7 @@ HELP_PAGES: dict[str, tuple[str, str]] = {
         "**Tout le monde** — `/aide` `/ping` `/profil` `/completer_profil` "
         "`/prix*` `/watchlist*` `/ordre_info` `/quete`\n\n"
         "**Officier+** — `/deployer` `/deployer_fin` `/promotion` (officier : Chevalier) `/admin_statut`\n\n"
-        "**Seigneur de Guerre / Grand Trésorier** — `/ordre_creer` + boutons Progression/Terminer\n\n"
+        "**Maître de Guerre / Grand Trésorier** — `/ordre_creer` + boutons Progression/Terminer\n\n"
         "**Grand Trésorier** — `/tresorerie_*` `/dette_*` `/ressource_*` "
         "(donateur **obligatoire** sur dépôt et ressource)\n\n"
         "**Maître de Guilde** — `/retrograder` `/admin_sync` `/save` `/load` `/backup_info`\n\n"

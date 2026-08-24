@@ -17,7 +17,7 @@ RANKS = {
     "recruit": "🔵 Recrue",
     "knight": "🟣 Chevalier",
     "officer": "🟢 Officier",
-    "war_lord": "🟡 Seigneur de Guerre",
+    "war_lord": "🟡 Maître de Guerre",
     "grand_treasurer": "🔴 Grand Trésorier",
     "guild_master": "🟠 Maître de Guilde",
 }

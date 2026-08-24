@@ -599,7 +599,7 @@ class Orders(commands.Cog):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         if not isinstance(interaction.user, discord.Member) or not _can_manage(interaction.user):
-            await interaction.followup.send("Seuls Seigneur de Guerre / Grand Trésorier (ou mode test).", ephemeral=True)
+            await interaction.followup.send("Seuls Maître de Guerre / Grand Trésorier.", ephemeral=True)
             return
         if objectif <= 0:
             await interaction.followup.send(embed=error_embed("Objectif invalide"), ephemeral=True)

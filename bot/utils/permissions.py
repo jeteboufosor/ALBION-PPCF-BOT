@@ -36,13 +36,27 @@ def _member_role_names(member: discord.Member) -> set[str]:
     return {role.name for role in member.roles}
 
 
+def _role_name_matches(actual: str, expected: str) -> bool:
+    left = _fold(actual)
+    right = _fold(expected)
+    if not left or not right:
+        return False
+    return left == right or left in right or right in left
+
+
 def has_any_role(member: discord.Member, role_keys: tuple[str, ...] | list[str] | set[str]) -> bool:
     names = _member_role_names(member)
     expected = {ROLE_NAMES[key] for key in role_keys if key in ROLE_NAMES}
-    return bool(names & expected)
+    for name in names:
+        for exp in expected:
+            if _role_name_matches(name, exp):
+                return True
+    return False
 
 
 def is_guild_master(member: discord.Member) -> bool:
+    if member.guild_permissions.administrator:
+        return True
     return has_any_role(member, ADMIN_ROLE_KEYS)
 
 
