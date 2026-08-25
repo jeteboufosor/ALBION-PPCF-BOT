@@ -342,7 +342,15 @@ async def complete_order(
             },
             "people": [(p.member.discord_id if p.member else 0, p.member.discord_name if p.member else "?", p.contribution_amount) for p in ranking],
         }
-        await refresh_order_message(bot, order)
+
+    # Refresh Discord message outside DB session to avoid holding connections
+    try:
+        async with session_scope() as session:
+            order = await _load_order(session, order_id)
+            if order:
+                await refresh_order_message(bot, order)
+    except Exception:
+        LOGGER.exception("refresh_order_message échoué pour ordre %s", order_id)
 
     # DMs hors transaction
     won = bool(snapshot.get("success"))
@@ -407,6 +415,7 @@ async def credit_order_contribution(
     """Ajoute une contribution aux ordres actifs du bon type (si le membre a accepté)."""
 
     closed: list[int] = []
+    updated_ids: list[int] = []
     async with session_scope() as session:
         result = await session.execute(
             select(Order)
@@ -427,9 +436,18 @@ async def credit_order_contribution(
             total = order.current_amount or 1
             for p in order.participants:
                 p.contribution_percent = p.contribution_amount * 100 / total
-            await refresh_order_message(bot, order)
+            updated_ids.append(order.id)
             if order.current_amount >= order.target_amount:
                 closed.append(order.id)
+    # Refresh messages outside DB session
+    for oid in updated_ids:
+        try:
+            async with session_scope() as session:
+                order = await _load_order(session, oid)
+                if order:
+                    await refresh_order_message(bot, order)
+        except Exception:
+            LOGGER.debug("refresh_order_message échoué pour ordre %s", oid)
     for oid in closed:
         await complete_order(bot, oid, reason="quota")
     return closed
@@ -459,10 +477,18 @@ async def credit_collective_silver(bot: commands.Bot, *, amount: int) -> tuple[i
             total = order.current_amount or 1
             for p in order.participants:
                 p.contribution_percent = p.contribution_amount * 100 / total
-            await refresh_order_message(bot, order)
             credited.append(order.id)
             if order.current_amount >= order.target_amount:
                 closed.append(order.id)
+    # Refresh messages outside DB session
+    for oid in credited:
+        try:
+            async with session_scope() as session:
+                order = await _load_order(session, oid)
+                if order:
+                    await refresh_order_message(bot, order)
+        except Exception:
+            LOGGER.debug("refresh_order_message échoué pour ordre %s", oid)
     for oid in closed:
         await complete_order(bot, oid, reason="quota")
     return len(credited), closed
