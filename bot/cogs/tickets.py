@@ -344,7 +344,8 @@ async def handle_ticket_button(interaction: discord.Interaction, action: str, pa
 
     ticket_id = int(payload)
     if action == "close":
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         await close_ticket(interaction.client, ticket_id, user.id)
         try:
             await interaction.followup.send("Ticket fermé.", ephemeral=True)
@@ -354,9 +355,11 @@ async def handle_ticket_button(interaction: discord.Interaction, action: str, pa
 
     if action in {"approve", "deny"}:
         if not isinstance(user, discord.Member) or not (settings.test_mode or can_manage_treasury(user) or is_officer(user)):
-            await interaction.response.send_message("Réservé au trésorier.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Réservé au trésorier.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         if action == "approve" and interaction.guild:
             from bot.cogs.treasury import log_history, refresh_treasury_panel
 
@@ -381,28 +384,22 @@ class Tickets(commands.Cog):
         self.bot.remove_dynamic_items(TicketActionItem)
 
     @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        if interaction.type is not discord.InteractionType.component or not interaction.data:
-            return
-        custom_id = str(interaction.data.get("custom_id") or "")
-        if not custom_id.startswith("ticket:"):
-            return
-        parts = custom_id.split(":")
-        if len(parts) != 3:
-            return
-        _, action, payload = parts
-        if action == "open":
-            return
-        await handle_ticket_button(interaction, action, payload)
-
-    @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or not message.guild:
             return
-        async with session_scope() as session:
-            ticket = await session.scalar(select(Ticket).where(Ticket.channel_id == message.channel.id, Ticket.status == "open"))
-            if ticket:
-                ticket.last_activity_at = utcnow()
+        # Filtre rapide : ne requête la DB que pour les salons ticket-*
+        channel_name = getattr(message.channel, "name", "")
+        if not channel_name.startswith("ticket-"):
+            return
+        try:
+            async with session_scope() as session:
+                ticket = await session.scalar(
+                    select(Ticket).where(Ticket.channel_id == message.channel.id, Ticket.status == "open")
+                )
+                if ticket:
+                    ticket.last_activity_at = utcnow()
+        except Exception:
+            LOGGER.debug("on_message ticket update ignoré pour %s", message.channel.id)
 
 
 async def setup(bot: commands.Bot) -> None:

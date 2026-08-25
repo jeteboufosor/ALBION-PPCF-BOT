@@ -191,7 +191,7 @@ class Treasury(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="taxe", description="Collecte les taxes hebdomadaires (ajoute à la trésorerie et avance les ordres « Silver donné », sans affecter le classement).")
+    @app_commands.command(name="taxe", description="Collecte les taxes hebdo (trésorerie + ordres Silver, sans classement).")
     @app_commands.guild_only()
     @app_commands.describe(montant="Total de silver collecté en taxes cette semaine")
     async def taxe(

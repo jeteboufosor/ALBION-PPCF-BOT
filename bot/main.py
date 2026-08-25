@@ -50,26 +50,32 @@ class AlbionGuildBot(commands.Bot):
         self.tree.on_error = self.on_app_command_error
 
         if settings.sync_commands_on_start:
-            if settings.guild_id:
-                guild = discord.Object(id=settings.guild_id)
-                self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                self.logger.info(
-                    "%s commande(s) slash synchronisée(s) sur la guilde %s: %s",
-                    len(synced),
-                    settings.guild_id,
-                    ", ".join(f"/{command.name}" for command in synced) or "aucune",
-                )
-            else:
-                synced = await self.tree.sync()
-                self.logger.info(
-                    "%s commande(s) slash globale(s) synchronisée(s): %s",
-                    len(synced),
-                    ", ".join(f"/{command.name}" for command in synced) or "aucune",
-                )
-            if not synced:
-                self.logger.warning(
-                    "Aucune commande à synchroniser: vérifiez que les cogs exposant des slash commands sont bien chargés."
+            try:
+                if settings.guild_id:
+                    guild = discord.Object(id=settings.guild_id)
+                    self.tree.copy_global_to(guild=guild)
+                    synced = await self.tree.sync(guild=guild)
+                    self.logger.info(
+                        "%s commande(s) slash synchronisée(s) sur la guilde %s: %s",
+                        len(synced),
+                        settings.guild_id,
+                        ", ".join(f"/{command.name}" for command in synced) or "aucune",
+                    )
+                else:
+                    synced = await self.tree.sync()
+                    self.logger.info(
+                        "%s commande(s) slash globale(s) synchronisée(s): %s",
+                        len(synced),
+                        ", ".join(f"/{command.name}" for command in synced) or "aucune",
+                    )
+                if not synced:
+                    self.logger.warning(
+                        "Aucune commande à synchroniser: vérifiez que les cogs exposant des slash commands sont bien chargés."
+                    )
+            except Exception:
+                self.logger.exception(
+                    "Sync des commandes échouée — le bot continue sans sync. "
+                    "Vérifiez les descriptions (max 100 chars) et les noms de commandes."
                 )
 
     async def _load_available_cogs(self) -> None:
