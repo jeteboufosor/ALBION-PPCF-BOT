@@ -38,6 +38,8 @@ async def run_order_fame_sync(bot: commands.Bot) -> int:
                     member = part.member
                     if member is None:
                         continue
+                    if not member.albion_player_id and not member.albion_name:
+                        continue
                     fame, pid = await fetch_member_fame(
                         api,
                         player_id=member.albion_player_id,
@@ -46,12 +48,16 @@ async def run_order_fame_sync(bot: commands.Bot) -> int:
                     )
                     if pid and not member.albion_player_id:
                         member.albion_player_id = pid
-                    if part.baseline_fame is None:
+                    if fame is None:
+                        # Erreur API ou stats indisponibles : on ne modifie pas les valeurs ce tour-ci
+                        continue
+                    # Si la baseline n'était pas encore fixée, ou si anomalie baseline=0 avec contribution=0
+                    if part.baseline_fame is None or (part.baseline_fame == 0 and part.contribution_amount == 0 and fame > 1000):
                         part.baseline_fame = fame
                         changed = True
                         continue
                     gained = max(0, fame - part.baseline_fame)
-                    if gained != part.contribution_amount:
+                    if gained > part.contribution_amount:
                         part.contribution_amount = gained
                         changed = True
                 if not changed:

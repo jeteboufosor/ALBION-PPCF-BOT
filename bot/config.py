@@ -142,7 +142,7 @@ CHANNEL_NAMES: Final[dict[str, str]] = {
 # TTL cache recommandés.
 CACHE_TTL_SECONDS: Final[dict[str, int]] = {
     "market_prices": 600,
-    "player_info": 3600,
+    "player_info": 300,
     "recent_kills": 300,
     "item_icons": 86400,
 }

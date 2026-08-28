@@ -630,6 +630,66 @@ class Onboarding(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="profil_pseudo", description="Associe ou met à jour directement ton pseudo Albion Online.")
+    @app_commands.describe(pseudo="Ton pseudo exact en jeu sur le serveur Europe")
+    async def profil_pseudo(self, interaction: discord.Interaction, pseudo: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+        cleaned = pseudo.strip()
+        if not cleaned:
+            await interaction.followup.send(
+                embed=error_embed("Pseudo invalide", "Le pseudo ne peut pas être vide."),
+                ephemeral=True,
+            )
+            return
+
+        api = AlbionAPIClient()
+        found_id: str | None = None
+        exact_name: str = cleaned
+        try:
+            search = await api.search_players(cleaned)
+            players = (search.get("players") if isinstance(search, dict) else None) or []
+            if players:
+                target = cleaned.lower()
+                match = next((p for p in players if isinstance(p, dict) and str(p.get("Name", "")).lower() == target), None)
+                if match:
+                    found_id = str(match.get("Id") or "") or None
+                    exact_name = str(match.get("Name") or cleaned)
+                else:
+                    first = players[0]
+                    if isinstance(first, dict):
+                        found_id = str(first.get("Id") or "") or None
+                        exact_name = str(first.get("Name") or cleaned)
+        except AlbionAPIError:
+            pass
+        finally:
+            await api.close()
+
+        async with session_scope() as session:
+            db_member = await get_or_create_member(
+                session, discord_id=interaction.user.id, discord_name=interaction.user.display_name
+            )
+            db_member.albion_name = exact_name
+            if found_id:
+                db_member.albion_player_id = found_id
+            db_member.profile_completed = True
+            rules_ok = db_member.rules_accepted
+
+        validated = await maybe_validate_member(interaction, rules_ok=rules_ok, profile_ok=True)
+        extra = "" if rules_ok else "\nIl te reste à accepter les règles dans #règles."
+        if validated:
+            extra = "\nTu es maintenant **Recrue**. Bienvenue !"
+
+        detail = f"Pseudo Albion associé : **{exact_name}**"
+        if found_id:
+            detail += f" (ID: `{found_id}`)"
+        else:
+            detail += "\n-# *Note : introuvable sur le serveur Europe via l'API, mais enregistré en base.*"
+
+        await interaction.followup.send(
+            embed=success_embed("Profil mis à jour", f"{detail}{extra}"),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="profil", description="Fiche profil (dons, points, portrait Albion équipé).")
     @app_commands.describe(membre="Laisse vide = toi")
     async def profil(self, interaction: discord.Interaction, membre: discord.Member | None = None) -> None:

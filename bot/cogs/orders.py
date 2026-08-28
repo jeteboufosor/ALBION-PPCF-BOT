@@ -540,6 +540,7 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
 
     if action == "accept":
         await interaction.response.defer()
+        has_albion = False
         async with session_scope() as session:
             order = await _load_order(session, order_id)
             if order is None or order.status != "active":
@@ -551,7 +552,8 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
                 await interaction.followup.send("Tu es déjà inscrit.", ephemeral=True)
                 return
             baseline = None
-            if order.objective_type in {"gathering_fame", "pve_fame"}:
+            has_albion = bool(member.albion_name or member.albion_player_id)
+            if order.objective_type in {"gathering_fame", "pve_fame"} and has_albion:
                 from bot.services.albion_api import AlbionAPIClient
                 from bot.services.fame import fetch_member_fame
 
@@ -582,7 +584,10 @@ async def handle_order_action(interaction: discord.Interaction, action: str, ord
             await interaction.edit_original_response(embed=embed, view=view)
         extra = ""
         if order.objective_type in {"gathering_fame", "pve_fame"}:
-            extra = " La fame sera suivie automatiquement (pseudo Albion dans le formulaire)."
+            if not has_albion:
+                extra = " ⚠️ **Attention :** ton pseudo Albion n'est pas encore renseigné ! Tape `/profil_pseudo` ou `/completer_profil` pour que ta progression soit suivie automatiquement."
+            else:
+                extra = " La fame sera suivie automatiquement via l'API Albion."
         await interaction.followup.send(embed=success_embed("Inscription OK", extra or None), ephemeral=True)
         return
 
