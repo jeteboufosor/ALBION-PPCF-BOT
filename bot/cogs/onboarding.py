@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from urllib.parse import quote
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -24,6 +22,7 @@ from bot.database.engine import session_scope
 from bot.database.models import ContributionScore, utcnow
 from bot.services.albion_api import AlbionAPIClient, AlbionAPIError
 from bot.utils.embeds import error_embed, format_silver, info_embed, success_embed, warning_embed
+from bot.utils.equipment import character_render_url, equip_token
 from bot.utils.permissions import find_channel, find_role, is_guild_master, is_officer
 
 LOGGER = logging.getLogger(__name__)
@@ -50,30 +49,7 @@ RULES_CUSTOM_ID = "onboarding:accept_rules"
 PROFILE_CUSTOM_ID = "onboarding:open_profile"
 
 
-def _equip_token(item: dict[str, Any] | None) -> str:
-    if not item:
-        return ""
-    typ = item.get("Type") or item.get("TypeName") or ""
-    if not typ:
-        return ""
-    enchant = int(item.get("EnchantmentLevel") or 0)
-    quality = int(item.get("Quality") or 1)
-    if enchant:
-        return f"{typ}@{enchant}?{quality}"
-    return f"{typ}?{quality}"
-
-
-def character_render_url(equipment: dict[str, Any] | None) -> str | None:
-    """Portrait équipé via l'API Render officielle."""
-
-    if not equipment:
-        return None
-    order = ("MainHand", "OffHand", "Head", "Armor", "Shoes", "Bag", "Cape", "Mount", "Potion", "Food")
-    parts = [_equip_token(equipment.get(slot) if isinstance(equipment.get(slot), dict) else None) for slot in order]
-    if not any(parts):
-        return None
-    code = "|".join(parts)
-    return f"https://render.albiononline.com/v1/character/{quote(code, safe='@?|_')}.png?size=512"
+_equip_token = equip_token  # alias rétro-compatible
 
 
 async def build_member_profile_embed(user: discord.abc.User) -> discord.Embed:

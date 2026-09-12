@@ -59,6 +59,16 @@ class AlbionAPIClient:
     async def get_player_deaths(self, player_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
         return await self._get(f"players/{player_id}/deaths", limit=limit)
 
+    async def get_player_kills_fresh(self, player_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """Kills récents SANS cache — poll killboard (on veut du neuf à chaque passe)."""
+
+        return await self._get(f"players/{player_id}/kills", limit=limit)
+
+    async def get_player_deaths_fresh(self, player_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """Morts récentes SANS cache — poll killboard (on veut du neuf à chaque passe)."""
+
+        return await self._get(f"players/{player_id}/deaths", limit=limit)
+
     @cached(ttl=CACHE_TTL_SECONDS["player_info"])
     async def get_guild_members(self, guild_id: str | None = None) -> list[dict[str, Any]]:
         """Membres de la guilde Albion."""

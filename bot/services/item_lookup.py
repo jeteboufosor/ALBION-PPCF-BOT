@@ -17,6 +17,7 @@ LOGGER = logging.getLogger(__name__)
 ITEMS_URL = "https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/items.json"
 
 _catalog: list[tuple[str, str, str]] = []  # unique, fr, en
+_catalog_by_uid: dict[str, tuple[str, str, str]] = {}
 _loaded = False
 
 _FALLBACK_BASE: dict[str, str] = {
@@ -50,7 +51,7 @@ def _fold(text: str) -> str:
 
 
 async def ensure_catalog() -> None:
-    global _catalog, _loaded
+    global _catalog, _catalog_by_uid, _loaded
     if _loaded:
         return
     try:
@@ -63,6 +64,7 @@ async def ensure_catalog() -> None:
         _loaded = True
         return
     catalog: list[tuple[str, str, str]] = []
+    by_uid: dict[str, tuple[str, str, str]] = {}
     if isinstance(data, list):
         iterable = data
     elif isinstance(data, dict):
@@ -81,7 +83,9 @@ async def ensure_catalog() -> None:
         if not fr:
             fr = en
         catalog.append((uid, fr, en))
+        by_uid[uid] = (uid, fr, en)
     _catalog = catalog
+    _catalog_by_uid = by_uid
     _loaded = True
     LOGGER.info("Catalogue items chargé: %s entrées", len(_catalog))
 
@@ -147,3 +151,36 @@ async def item_autocomplete(interaction: "discord.Interaction", current: str):
 
     choices = await resolve_item_query(current)
     return [app_commands.Choice(name=label[:100], value=uid) for uid, label in choices[:25]]
+
+
+async def item_label(raw_type: str) -> str:
+    """Libellé FR lisible d'un Type d'item (ex: ``T6_2H_NATURESTAFF@2``).
+
+    Utilise le catalogue pour le nom localisé, sinon retombe sur le Type nettoyé.
+    """
+
+    raw = (raw_type or "").strip()
+    if not raw:
+        return "—"
+    await ensure_catalog()
+    base = raw.split("@")[0].split("?")[0]
+    enchant = 0
+    if "@" in raw:
+        token = raw.split("@", 1)[1].split("?")[0]
+        enchant = int(token) if token.isdigit() else 0
+    tier_m = re.match(r"T(\d+)_", base)
+    tier = tier_m.group(1) if tier_m else None
+
+    entry = _catalog_by_uid.get(base)
+    if entry:
+        _, fr, en = entry
+        name = fr or en or base
+    else:
+        name = base.replace("_", " ")
+
+    label = name
+    if tier and not name.startswith(f"T{tier}"):
+        label = f"T{tier} {name}"
+    if enchant:
+        label += f" ⚡{enchant}"
+    return label
