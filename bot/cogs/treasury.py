@@ -191,9 +191,9 @@ class Treasury(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="taxe", description="Collecte les taxes hebdo (trésorerie + ordres Silver, sans classement).")
+    @app_commands.command(name="taxe", description="Collecte les taxes (trésorerie + ordres Silver, sans classement).")
     @app_commands.guild_only()
-    @app_commands.describe(montant="Total de silver collecté en taxes cette semaine")
+    @app_commands.describe(montant="Total de silver collecté en taxes")
     async def taxe(
         self,
         interaction: discord.Interaction,
@@ -215,7 +215,7 @@ class Treasury(commands.Cog):
                     transaction_type="deposit",
                     amount=montant,
                     balance_after=state.current_balance,
-                    note="TAXE: collecte hebdomadaire (effort collectif)",
+                    note="TAXE: collecte (effort collectif)",
                     author_discord_id=interaction.user.id,
                 )
             )
@@ -232,7 +232,7 @@ class Treasury(commands.Cog):
             order_note += f"\n✅ {len(closed)} ordre(s) atteint(s) et clôturé(s) automatiquement."
         await log_history(
             interaction.guild,  # type: ignore[arg-type]
-            "🏛️ Taxe hebdomadaire collectée",
+            "🏛️ Taxe collectée",
             f"**{format_silver(montant)}** ajoutés à la trésorerie\nEffort collectif — non crédité au classement{order_note}",
         )
         await interaction.followup.send(
